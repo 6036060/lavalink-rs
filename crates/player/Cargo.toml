@@ -1,0 +1,10 @@
+[package]
+name = "lavalink-player"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "プレイヤー状態機械（フェーズ2: モック / フェーズ4: 実音声）"
+
+[dependencies]
+lavalink-protocol.workspace = true

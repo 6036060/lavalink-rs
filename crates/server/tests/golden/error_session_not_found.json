@@ -1,0 +1,7 @@
+{
+  "timestamp": 0,
+  "status": 404,
+  "error": "Not Found",
+  "message": "Session not found",
+  "path": "/v4/sessions/does-not-exist/players/123"
+}

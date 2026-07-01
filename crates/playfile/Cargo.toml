@@ -1,0 +1,19 @@
+[package]
+name = "lavalink-playfile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "開発用: ローカル音声ファイルを Discord VC に流す end-to-end 疎通ツール"
+
+[[bin]]
+name = "playfile"
+path = "src/main.rs"
+
+[dependencies]
+lavalink-audio-pipeline.workspace = true
+lavalink-discord-voice.workspace = true
+lavalink-protocol.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing-subscriber.workspace = true

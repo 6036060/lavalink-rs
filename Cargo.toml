@@ -1,0 +1,72 @@
+# Lavalink v4 互換サーバー (Rust) — ワークスペース定義
+#
+# 注意: 依存のバージョンは 2026-06 時点で妥当と思われる値を記載。
+# 本スキャフォールドは cargo 不在の環境で生成したため、初回は CI / ローカルで
+# `cargo update && cargo check` を回してバージョン整合を確認すること（チケット 1-2 の検証）。
+
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+license = "MIT"
+repository = "https://example.invalid/lavalink-rs-server"
+
+[workspace.dependencies]
+# --- 内部クレート ---
+lavalink-protocol       = { path = "crates/protocol" }
+lavalink-track-codec    = { path = "crates/track-codec" }
+lavalink-player         = { path = "crates/player" }
+lavalink-audio-pipeline = { path = "crates/audio-pipeline" }
+lavalink-discord-voice  = { path = "crates/discord-voice" }
+lavalink-source-youtube = { path = "crates/source-youtube" }
+
+# --- 非同期ランタイム / HTTP / WS ---
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+tokio-tungstenite = "0.24"   # Discord Voice Gateway への外向き WS クライアント用
+futures-util = "0.3"
+bytes = "1"
+
+# --- シリアライズ ---
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+config = { version = "0.14", default-features = false, features = ["yaml"] }  # application.yml 互換読み込み
+
+# --- 音声処理 ---
+symphonia = { version = "0.5", default-features = false }  # コンテナ/コーデックは features で個別有効化
+opus = "0.3"          # libopus バインディング（エンコード）。代替: audiopus
+rubato = "0.15"       # リサンプラ
+
+# --- 暗号 (Discord トランスポート暗号 + DAVE フレーム暗号) ---
+aes-gcm = "0.10"
+chacha20poly1305 = "0.10"
+rand = "0.8"
+openmls = "0.6"       # DAVE(E2EE) 用。重く実験的なので discord-voice の "dave" feature 下でのみ有効化
+
+# --- YouTube 抽出 ---
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli", "stream"] }
+url = "2"
+regex = "1"
+
+# --- 共通 ---
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+byteorder = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[patch.crates-io]
+openmls = { path = "vendor/openmls" }

@@ -1,0 +1,12 @@
+[package]
+name = "lavalink-track-codec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Lavaplayer 互換の encoded track バイナリ シリアライズ/デシリアライズ"
+
+[dependencies]
+lavalink-protocol.workspace = true
+base64.workspace = true
+thiserror.workspace = true

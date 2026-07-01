@@ -1,0 +1,43 @@
+[package]
+name = "lavalink-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Lavalink v4 互換 HTTP/WS サーバー（バイナリ）"
+
+[[bin]]
+name = "lavalink-rs"
+path = "src/main.rs"
+
+[features]
+default = []
+# DAVE(E2EE) を有効化（通常VC対応, openmls）。実機検証が必要。
+dave = ["lavalink-discord-voice/dave-mls"]
+
+[dependencies]
+lavalink-protocol.workspace = true
+lavalink-player.workspace = true
+lavalink-track-codec.workspace = true
+lavalink-discord-voice.workspace = true
+lavalink-audio-pipeline.workspace = true
+lavalink-source-youtube.workspace = true
+
+tokio.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+config.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+reqwest.workspace = true
+rustls = { version = "0.23", features = ["ring"] }
+
+[dev-dependencies]
+# 統合テストで in-process に HTTP を叩く（tower::ServiceExt::oneshot）。
+tower = { workspace = true, features = ["util"] }

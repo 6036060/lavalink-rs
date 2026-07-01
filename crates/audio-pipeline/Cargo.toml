@@ -1,0 +1,16 @@
+[package]
+name = "lavalink-audio-pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "デコード / リサンプル / フィルタ / Opus エンコード パイプライン"
+
+[dependencies]
+lavalink-protocol.workspace = true
+# YouTube は WebM(Opus/Vorbis) / MP4(AAC) が中心。Opus は *デコードせず* パススルーする方針のため
+# symphonia には Opus デコーダは不要（mkv/ogg/isomp4 デマクサ + aac/vorbis/pcm デコーダ）。
+symphonia = { workspace = true, features = ["isomp4", "aac", "ogg", "vorbis", "mkv", "pcm", "wav", "mp3", "flac"] }
+opus.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

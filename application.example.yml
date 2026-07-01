@@ -1,0 +1,52 @@
+# Lavalink v4 互換サーバー設定例（既存 Lavalink の application.yml と同じ構造）
+# 起動時に作業ディレクトリの application.yml を読み込む。
+# 環境変数でも上書き可能（例: LAVALINK_SERVER_PASSWORD, SERVER_PORT）。
+
+server:
+  port: 2333
+  address: 0.0.0.0
+
+lavalink:
+  server:
+    password: "youshallnotpass"
+    # MVP は YouTube のみ true、それ以外は後続フェーズで対応
+    sources:
+      youtube: true
+      bandcamp: false
+      soundcloud: false
+      twitch: false
+      vimeo: false
+      nico: false
+      http: false
+      local: false
+    filters:
+      volume: true
+      equalizer: true
+      karaoke: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      distortion: true
+      rotation: true
+      channelMix: true
+      lowPass: true
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    opusEncodingQuality: 10
+    resamplingQuality: LOW
+    trackStuckThresholdMs: 10000
+    useSeekGhosting: true
+    youtubePlaylistLoadLimit: 6
+    playerUpdateInterval: 5
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: false
+
+metrics:
+  prometheus:
+    enabled: false
+    endpoint: /metrics
+
+logging:
+  level:
+    root: INFO
+    lavalink: INFO

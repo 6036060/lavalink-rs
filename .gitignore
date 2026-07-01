@@ -1,0 +1,8 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+.env
+/plugins
+*.log
+.DS_Store
+voice.env
