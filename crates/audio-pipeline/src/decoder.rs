@@ -31,9 +31,7 @@ pub fn decode(data: Vec<u8>, ext_hint: Option<&str>) -> Result<Vec<f32>, AudioEr
     let mut format = probed.format;
 
     let (track_id, src_rate, src_ch) = {
-        let track = format
-            .default_track()
-            .ok_or(AudioError::Unsupported("no default track"))?;
+        let track = format.default_track().ok_or(AudioError::Unsupported("no default track"))?;
         (
             track.id,
             track.codec_params.sample_rate.unwrap_or(48_000),
@@ -41,9 +39,7 @@ pub fn decode(data: Vec<u8>, ext_hint: Option<&str>) -> Result<Vec<f32>, AudioEr
         )
     };
 
-    let track = format
-        .default_track()
-        .ok_or(AudioError::Unsupported("no default track"))?;
+    let track = format.default_track().ok_or(AudioError::Unsupported("no default track"))?;
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| AudioError::Decode(e.to_string()))?;
@@ -95,18 +91,15 @@ impl StreamDecoder {
             .map_err(|e| AudioError::Decode(e.to_string()))?;
         let format = probed.format;
         let (track_id, src_rate, src_ch) = {
-            let track = format
-                .default_track()
-                .ok_or(AudioError::Unsupported("no default track"))?;
+            let track =
+                format.default_track().ok_or(AudioError::Unsupported("no default track"))?;
             (
                 track.id,
                 track.codec_params.sample_rate.unwrap_or(48_000),
                 track.codec_params.channels.map(|c| c.count()).unwrap_or(2),
             )
         };
-        let track = format
-            .default_track()
-            .ok_or(AudioError::Unsupported("no default track"))?;
+        let track = format.default_track().ok_or(AudioError::Unsupported("no default track"))?;
         let decoder = symphonia::default::get_codecs()
             .make(&track.codec_params, &DecoderOptions::default())
             .map_err(|e| AudioError::Decode(e.to_string()))?;

@@ -22,10 +22,8 @@ fn make_identity(user_id: u64) -> (SignatureKeyPair, CredentialWithKey) {
     let signer = SignatureKeyPair::new(DAVE_CIPHERSUITE.signature_algorithm())
         .expect("generate P256 signature keypair");
     let credential = BasicCredential::new(user_id.to_be_bytes().to_vec());
-    let cwk = CredentialWithKey {
-        credential: credential.into(),
-        signature_key: signer.public().into(),
-    };
+    let cwk =
+        CredentialWithKey { credential: credential.into(), signature_key: signer.public().into() };
     (signer, cwk)
 }
 
@@ -153,7 +151,12 @@ impl MlsBackend for OpenMlsBackend {
         let rest = &payload[1..];
         let (vec_len, hdr) = read_mls_varint(rest)?;
         let content = rest.get(hdr..hdr + vec_len as usize)?;
-        tracing::info!(op_type = payload[0], vec_len, content_len = content.len(), "dave: handling proposals");
+        tracing::info!(
+            op_type = payload[0],
+            vec_len,
+            content_len = content.len(),
+            "dave: handling proposals"
+        );
         tracing::info!(
             proposals_hex = %content.iter().map(|b| format!("{:02x}", b)).collect::<String>(),
             "dave: raw proposals FULL HEX (for ref diff)"
@@ -198,13 +201,16 @@ impl MlsBackend for OpenMlsBackend {
                 Ok(protocol) => match group.process_message(&self.provider, protocol) {
                     Ok(processed) => match processed.into_content() {
                         ProcessedMessageContent::ProposalMessage(prop) => {
-                            if group.store_pending_proposal(self.provider.storage(), *prop).is_ok() {
+                            if group.store_pending_proposal(self.provider.storage(), *prop).is_ok()
+                            {
                                 n_staged += 1;
                             }
                         }
                         _ => tracing::warn!("dave: processed message was not a proposal"),
                     },
-                    Err(e) => tracing::warn!(error = ?e, "dave: process_message(proposal) REJECTED"),
+                    Err(e) => {
+                        tracing::warn!(error = ?e, "dave: process_message(proposal) REJECTED")
+                    }
                 },
                 Err(e) => tracing::warn!(error = ?e, "dave: try_into_protocol_message failed"),
             }
@@ -261,7 +267,10 @@ impl MlsBackend for OpenMlsBackend {
             // 自分のコミットが採用された → 保留中のコミットを merge して epoch を進める。
             match group.merge_pending_commit(&self.provider) {
                 Ok(()) => {
-                    tracing::info!(epoch = group.epoch().as_u64(), "dave: merged our own announced commit");
+                    tracing::info!(
+                        epoch = group.epoch().as_u64(),
+                        "dave: merged our own announced commit"
+                    );
                     true
                 }
                 Err(e) => {
@@ -283,7 +292,10 @@ impl MlsBackend for OpenMlsBackend {
                     ProcessedMessageContent::StagedCommitMessage(staged) => {
                         let ok = group.merge_staged_commit(&self.provider, *staged).is_ok();
                         if ok {
-                            tracing::info!(epoch = group.epoch().as_u64(), "dave: applied other member's announced commit");
+                            tracing::info!(
+                                epoch = group.epoch().as_u64(),
+                                "dave: applied other member's announced commit"
+                            );
                         }
                         ok
                     }
@@ -324,9 +336,8 @@ impl MlsBackend for OpenMlsBackend {
 
     fn sender_base_secret(&self, sender_id: u64) -> Option<[u8; 16]> {
         let group = self.group.as_ref()?;
-        let secret = group
-            .export_secret(&self.provider, FRAMES_LABEL, &sender_id.to_le_bytes(), 16)
-            .ok()?;
+        let secret =
+            group.export_secret(&self.provider, FRAMES_LABEL, &sender_id.to_le_bytes(), 16).ok()?;
         let mut out = [0u8; 16];
         out.copy_from_slice(secret.as_slice());
         Some(out)
@@ -417,9 +428,8 @@ mod tests {
         let a = alice_group
             .export_secret(&alice_provider, FRAMES_LABEL, &2u64.to_le_bytes(), 16)
             .unwrap();
-        let b = bob_group
-            .export_secret(&bob_provider, FRAMES_LABEL, &2u64.to_le_bytes(), 16)
-            .unwrap();
+        let b =
+            bob_group.export_secret(&bob_provider, FRAMES_LABEL, &2u64.to_le_bytes(), 16).unwrap();
         assert_eq!(a, b);
     }
 }

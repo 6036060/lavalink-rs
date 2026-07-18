@@ -62,7 +62,8 @@ impl Biquad {
 
     #[inline]
     fn process(&mut self, x: f32) -> f32 {
-        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1
+        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
+            - self.a1 * self.y1
             - self.a2 * self.y2;
         self.x2 = self.x1;
         self.x1 = x;
@@ -131,7 +132,7 @@ impl Rotation {
     fn process(&mut self, buf: &mut [f32]) {
         for s in buf.chunks_exact_mut(2) {
             let pan = self.phase.sin(); // -1..1
-            // 等パワー的オートパン
+                                        // 等パワー的オートパン
             let gl = ((1.0 - pan) * 0.5).sqrt() * std::f32::consts::SQRT_2;
             let gr = ((1.0 + pan) * 0.5).sqrt() * std::f32::consts::SQRT_2;
             s[0] *= gl;
@@ -336,10 +337,11 @@ impl FilterChain {
             scale: d.scale.unwrap_or(1.0),
         });
 
-        let rotation = f.rotation.and_then(|r| r.rotation_hz).filter(|h| *h > 0.0).map(|hz| Rotation {
-            step: 2.0 * PI * hz / SR,
-            phase: 0.0,
-        });
+        let rotation = f
+            .rotation
+            .and_then(|r| r.rotation_hz)
+            .filter(|h| *h > 0.0)
+            .map(|hz| Rotation { step: 2.0 * PI * hz / SR, phase: 0.0 });
 
         let channel_mix = f.channel_mix.map(|c| ChannelMix {
             ll: c.left_to_left.unwrap_or(1.0),
@@ -533,10 +535,7 @@ mod tests {
         c.process(&mut buf);
         let rms_out = (buf.iter().map(|v| v * v).sum::<f32>() / buf.len() as f32).sqrt();
         // filterBand(220Hz) から離れたセンター成分は大幅に減衰する
-        assert!(
-            rms_out < rms_in * 0.1,
-            "center not removed: in={rms_in} out={rms_out}"
-        );
+        assert!(rms_out < rms_in * 0.1, "center not removed: in={rms_in} out={rms_out}");
     }
 
     #[test]

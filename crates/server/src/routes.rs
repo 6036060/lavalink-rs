@@ -12,7 +12,7 @@ use serde::Deserialize;
 use lavalink_player::MockPlayer;
 use lavalink_protocol::{
     Cpu, Event, Exception, Filters, GitInfo, Info, LoadResult, Memory, Player, ServerMessage,
-    Severity, SessionInfo, SessionUpdate, Stats, Track, TrackEndReason, TrackInfo,
+    SessionInfo, SessionUpdate, Severity, Stats, Track, TrackEndReason, TrackInfo,
     UpdatePlayerRequest, VersionInfo, VoiceState,
 };
 use lavalink_source_youtube::extract_video_id;
@@ -290,9 +290,8 @@ pub async fn get_player(
         .await
         .ok_or_else(|| ApiError::not_found("Session not found", path.clone()))?;
     let players = session.players.lock().await;
-    let player = players
-        .get(&guild_id)
-        .ok_or_else(|| ApiError::not_found("Player not found", path))?;
+    let player =
+        players.get(&guild_id).ok_or_else(|| ApiError::not_found("Player not found", path))?;
     Ok(Json(player.to_player()))
 }
 
@@ -303,6 +302,7 @@ pub struct NoReplaceQuery {
 }
 
 /// トラック指定の解決結果。
+#[allow(clippy::large_enum_variant)]
 enum TrackAction {
     Keep,
     Stop,
@@ -382,7 +382,9 @@ fn validate_filters(f: &Filters) -> Result<(), String> {
         for (name, v) in [("speed", ts.speed), ("pitch", ts.pitch), ("rate", ts.rate)] {
             if let Some(v) = v {
                 if v < 0.0 {
-                    return Err(format!("timescale {name} must be greater than or equal to 0.0: {v}"));
+                    return Err(format!(
+                        "timescale {name} must be greater than or equal to 0.0: {v}"
+                    ));
                 }
             }
         }
@@ -435,16 +437,36 @@ fn validate_filters(f: &Filters) -> Result<(), String> {
 /// 設定 (`lavalink.server.filters`) で無効化されているのに使われたフィルタ名を返す。
 fn disabled_filters_used(f: &Filters, cfg: &crate::config::Filters) -> Vec<&'static str> {
     let mut used = Vec::new();
-    if f.volume.is_some() && !cfg.volume { used.push("volume"); }
-    if f.equalizer.is_some() && !cfg.equalizer { used.push("equalizer"); }
-    if f.karaoke.is_some() && !cfg.karaoke { used.push("karaoke"); }
-    if f.timescale.is_some() && !cfg.timescale { used.push("timescale"); }
-    if f.tremolo.is_some() && !cfg.tremolo { used.push("tremolo"); }
-    if f.vibrato.is_some() && !cfg.vibrato { used.push("vibrato"); }
-    if f.distortion.is_some() && !cfg.distortion { used.push("distortion"); }
-    if f.rotation.is_some() && !cfg.rotation { used.push("rotation"); }
-    if f.channel_mix.is_some() && !cfg.channel_mix { used.push("channelMix"); }
-    if f.low_pass.is_some() && !cfg.low_pass { used.push("lowPass"); }
+    if f.volume.is_some() && !cfg.volume {
+        used.push("volume");
+    }
+    if f.equalizer.is_some() && !cfg.equalizer {
+        used.push("equalizer");
+    }
+    if f.karaoke.is_some() && !cfg.karaoke {
+        used.push("karaoke");
+    }
+    if f.timescale.is_some() && !cfg.timescale {
+        used.push("timescale");
+    }
+    if f.tremolo.is_some() && !cfg.tremolo {
+        used.push("tremolo");
+    }
+    if f.vibrato.is_some() && !cfg.vibrato {
+        used.push("vibrato");
+    }
+    if f.distortion.is_some() && !cfg.distortion {
+        used.push("distortion");
+    }
+    if f.rotation.is_some() && !cfg.rotation {
+        used.push("rotation");
+    }
+    if f.channel_mix.is_some() && !cfg.channel_mix {
+        used.push("channelMix");
+    }
+    if f.low_pass.is_some() && !cfg.low_pass {
+        used.push("lowPass");
+    }
     used
 }
 
@@ -501,9 +523,8 @@ pub async fn update_player(
 
     let player_json = {
         let mut players = session.players.lock().await;
-        let entry = players
-            .entry(guild_id.clone())
-            .or_insert_with(|| MockPlayer::new(guild_id.clone()));
+        let entry =
+            players.entry(guild_id.clone()).or_insert_with(|| MockPlayer::new(guild_id.clone()));
 
         // --- トラック操作 ---
         match resolve_track_action(&req) {
@@ -553,18 +574,20 @@ pub async fn update_player(
             if voice.is_complete() {
                 // dev: playfile が自動で読む voice.env を書き出す。voice token を平文で
                 // ディスクに残すため、明示オプトイン（LAVALINK_WRITE_VOICE_ENV=1）時のみ。
-                if std::env::var("LAVALINK_WRITE_VOICE_ENV").map_or(false, |v| v == "1") {
+                if std::env::var("LAVALINK_WRITE_VOICE_ENV").is_ok_and(|v| v == "1") {
                     let content = format!(
                         "GUILD_ID={}\nUSER_ID={}\nSESSION_ID={}\nVOICE_TOKEN={}\nVOICE_ENDPOINT={}\n",
                         guild_id, session.user_id, voice.session_id, voice.token, voice.endpoint
                     );
                     if std::fs::write("voice.env", content).is_ok() {
-                        tracing::info!("wrote voice.env -> run: cargo run -p lavalink-playfile -- <FILE>");
+                        tracing::info!(
+                            "wrote voice.env -> run: cargo run -p lavalink-playfile -- <FILE>"
+                        );
                     }
                 }
                 // playfile 等の外部ツールでこのセッションを使う場合、サーバー自身は
                 // 接続しない（同一セッションの二重接続を防ぎ 4006 を回避）。
-                if std::env::var("LAVALINK_SKIP_VOICE_CONNECT").map_or(false, |v| v == "1") {
+                if std::env::var("LAVALINK_SKIP_VOICE_CONNECT").is_ok_and(|v| v == "1") {
                     tracing::warn!(
                         "LAVALINK_SKIP_VOICE_CONNECT=1: サーバーは voice 接続をスキップします \
                          (voice.env を playfile 等で使うテスト用)。音声再生はされません。"

@@ -140,9 +140,7 @@ impl Default for YoutubeClient {
 
 impl YoutubeClient {
     pub fn new() -> Self {
-        let http = reqwest::Client::builder()
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        let http = reqwest::Client::builder().build().unwrap_or_else(|_| reqwest::Client::new());
         let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
         Self {
             http,
@@ -170,10 +168,7 @@ impl YoutubeClient {
             .await
             .ok()?;
         let v: Value = resp.json().await.ok()?;
-        v.get("po_token")
-            .or_else(|| v.get("poToken"))
-            .and_then(Value::as_str)
-            .map(String::from)
+        v.get("po_token").or_else(|| v.get("poToken")).and_then(Value::as_str).map(String::from)
     }
 
     /// invidious-companion 経由で player レスポンス（videoplayback URL 復号済み）を得る。
@@ -233,7 +228,10 @@ impl YoutubeClient {
 
     /// メタデータ + 再生ストリームを解決（複数クライアントをフォールバック）。
     /// 通常動画は直リンク、ライブ配信は HLS マニフェストを返す。
-    pub async fn resolve_stream(&self, video_id: &str) -> Result<(TrackInfo, ResolvedUrl), YtError> {
+    pub async fn resolve_stream(
+        &self,
+        video_id: &str,
+    ) -> Result<(TrackInfo, ResolvedUrl), YtError> {
         // invidious-companion 経由（URL は復号済み・PoToken/署名復号は companion が処理）。
         if self.companion_url.is_some() {
             match self.companion_player(video_id).await {
@@ -299,8 +297,7 @@ impl YoutubeClient {
                                 // パスセグメントとして pot を付与する。クエリだと
                                 // googlevideo がセグメント URL へ引き継がない。
                                 if let Some(pot) = &po_token {
-                                    *url =
-                                        format!("{}/pot/{}", url.trim_end_matches('/'), pot);
+                                    *url = format!("{}/pot/{}", url.trim_end_matches('/'), pot);
                                 }
                                 // セグメント取得にも同じクライアント UA を使わせる。
                                 *user_agent = Some(client.user_agent.to_string());
@@ -393,32 +390,21 @@ fn playability_error(resp: &Value) -> Option<String> {
     if s == "OK" {
         None
     } else {
-        let reason = status
-            .get("reason")
-            .and_then(Value::as_str)
-            .unwrap_or(s)
-            .to_string();
+        let reason = status.get("reason").and_then(Value::as_str).unwrap_or(s).to_string();
         Some(reason)
     }
 }
 
 fn meta_from_details(details: &Value, video_id: &str) -> Option<TrackInfo> {
     let title = details.get("title")?.as_str()?.to_string();
-    let author = details
-        .get("author")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    let author = details.get("author").and_then(Value::as_str).unwrap_or("").to_string();
     let length = details
         .get("lengthSeconds")
         .and_then(Value::as_str)
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0)
         * 1000;
-    let is_live = details
-        .get("isLiveContent")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let is_live = details.get("isLiveContent").and_then(Value::as_bool).unwrap_or(false);
     Some(TrackInfo {
         identifier: video_id.to_string(),
         is_seekable: !is_live,
@@ -447,10 +433,7 @@ fn parse_player(resp: &Value, video_id: &str) -> Option<(TrackInfo, ResolvedUrl)
     let hls = sd.get("hlsManifestUrl").and_then(Value::as_str);
 
     // ライブ配信は HLS のみ（直リンクは 403 になるため次クライアントへ委ねる）。
-    let is_live = resp
-        .pointer("/videoDetails/isLive")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let is_live = resp.pointer("/videoDetails/isLive").and_then(Value::as_bool).unwrap_or(false);
     if is_live {
         return hls.map(|h| (info, ResolvedUrl::Hls { url: h.to_string(), user_agent: None }));
     }
@@ -613,7 +596,10 @@ mod tests {
             extract_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s").as_deref(),
             Some("dQw4w9WgXcQ")
         );
-        assert_eq!(extract_video_id("https://youtu.be/dQw4w9WgXcQ").as_deref(), Some("dQw4w9WgXcQ"));
+        assert_eq!(
+            extract_video_id("https://youtu.be/dQw4w9WgXcQ").as_deref(),
+            Some("dQw4w9WgXcQ")
+        );
         assert_eq!(extract_video_id("not a video"), None);
     }
 

@@ -113,4 +113,3 @@ impl AppState {
 pub fn uptime_ms(state: &AppState) -> u64 {
     state.started.elapsed().as_millis() as u64
 }
-

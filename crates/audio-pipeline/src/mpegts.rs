@@ -164,11 +164,15 @@ mod tests {
         let mut s = vec![
             0x00, // pointer_field
             0x00, // table_id (PAT)
-            0xB0, 13, // section_length
-            0x00, 0x01, // transport_stream_id
+            0xB0,
+            13, // section_length
+            0x00,
+            0x01, // transport_stream_id
             0xC1, // version/current_next
-            0x00, 0x00, // section_number / last_section_number
-            0x00, 0x01, // program_number = 1
+            0x00,
+            0x00, // section_number / last_section_number
+            0x00,
+            0x01, // program_number = 1
             0xE0 | ((pmt_pid >> 8) as u8 & 0x1F),
             pmt_pid as u8,
         ];
@@ -180,16 +184,22 @@ mod tests {
         let mut s = vec![
             0x00, // pointer_field
             0x02, // table_id (PMT)
-            0xB0, 18, // section_length = 9 + 5(ES) + 4(CRC)
-            0x00, 0x01, // program_number
+            0xB0,
+            18, // section_length = 9 + 5(ES) + 4(CRC)
+            0x00,
+            0x01, // program_number
             0xC1, // version/current_next
-            0x00, 0x00, // section_number / last_section_number
-            0xE0, 0x00, // PCR PID (dummy)
-            0xF0, 0x00, // program_info_length = 0
+            0x00,
+            0x00, // section_number / last_section_number
+            0xE0,
+            0x00, // PCR PID (dummy)
+            0xF0,
+            0x00, // program_info_length = 0
             0x0F, // stream_type = ADTS AAC
             0xE0 | ((aac_pid >> 8) as u8 & 0x1F),
             aac_pid as u8,
-            0xF0, 0x00, // ES_info_length = 0
+            0xF0,
+            0x00, // ES_info_length = 0
         ];
         s.extend_from_slice(&[0, 0, 0, 0]); // CRC
         s

@@ -73,7 +73,9 @@ async fn main() -> anyhow::Result<()> {
         let pcm = decoder::decode(data, ext.as_deref())?;
         let seconds = pcm.len() as f64 / 2.0 / 48_000.0;
         write_wav(&out, &pcm)?;
-        println!("wrote {out} ({seconds:.1}s, 48kHz stereo) — 任意のプレイヤーで再生して確認できます");
+        println!(
+            "wrote {out} ({seconds:.1}s, 48kHz stereo) — 任意のプレイヤーで再生して確認できます"
+        );
         return Ok(());
     }
 
@@ -124,12 +126,14 @@ async fn main() -> anyhow::Result<()> {
 
         println!("connecting to voice endpoint {} (video mode) ...", cfg.endpoint);
         let conn = VoiceConnection::connect(cfg).await?;
-        let video_tx = conn
-            .video_sender()
-            .ok_or_else(|| anyhow::anyhow!("video sender unavailable"))?;
+        let video_tx =
+            conn.video_sender().ok_or_else(|| anyhow::anyhow!("video sender unavailable"))?;
 
         let total = frames.len();
-        println!("sending {total} video frames at {fps}fps (~{:.1}s) ...", total as f64 / fps as f64);
+        println!(
+            "sending {total} video frames at {fps}fps (~{:.1}s) ...",
+            total as f64 / fps as f64
+        );
         let step = 90_000 / fps.max(1);
         let mut ts: u32 = 0;
         for f in frames {

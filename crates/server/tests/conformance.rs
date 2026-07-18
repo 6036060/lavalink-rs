@@ -193,8 +193,17 @@ fn assert_track_schema(t: &Value) {
     }
     let info = &t["info"];
     for k in [
-        "identifier", "isSeekable", "author", "length", "isStream", "position", "title", "uri",
-        "artworkUrl", "isrc", "sourceName",
+        "identifier",
+        "isSeekable",
+        "author",
+        "length",
+        "isStream",
+        "position",
+        "title",
+        "uri",
+        "artworkUrl",
+        "isrc",
+        "sourceName",
     ] {
         assert!(info.get(k).is_some(), "info missing key: {k}");
     }
@@ -204,13 +213,8 @@ fn assert_track_schema(t: &Value) {
 
 #[tokio::test]
 async fn unknown_session_error_matches_official_shape() {
-    let (status, actual) = send(
-        &app(),
-        "GET",
-        "/v4/sessions/does-not-exist/players/123",
-        None,
-    )
-    .await;
+    let (status, actual) =
+        send(&app(), "GET", "/v4/sessions/does-not-exist/players/123", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     let expected: Value =
@@ -238,13 +242,8 @@ async fn update_player_returns_v4_player_shape() {
     let guild = "1425444129260703777";
 
     let body = json!({ "track": { "encoded": SAMPLE } }).to_string();
-    let (status, player) = send(
-        &app,
-        "PATCH",
-        &format!("/v4/sessions/{sid}/players/{guild}"),
-        Some(&body),
-    )
-    .await;
+    let (status, player) =
+        send(&app, "PATCH", &format!("/v4/sessions/{sid}/players/{guild}"), Some(&body)).await;
     assert_eq!(status, StatusCode::OK);
 
     let expected = json!({
@@ -287,10 +286,7 @@ fn ser(msg: &ServerMessage) -> Value {
 
 #[tokio::test]
 async fn ws_ready_op_matches_docs() {
-    let actual = ser(&ServerMessage::Ready {
-        resumed: false,
-        session_id: "abc".into(),
-    });
+    let actual = ser(&ServerMessage::Ready { resumed: false, session_id: "abc".into() });
     let expected = json!({ "op": "ready", "resumed": false, "sessionId": "abc" });
     assert!(json_diff(&expected, &actual, &[]).is_empty(), "{actual}");
 }

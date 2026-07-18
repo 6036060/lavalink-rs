@@ -87,6 +87,9 @@ pub struct VoiceConnection {
 
 impl VoiceConnection {
     /// ハンドシェイクを行い、送出タスク群を起動する。
+    // dave 無効時は DaveCryptor/DaveVideoCryptor が `()` になり、clone/引数渡しが
+    // clippy に unit として検出されるが、dave 有効時は Arc なので意図通り。
+    #[allow(clippy::clone_on_copy, clippy::unit_arg)]
     pub async fn connect(cfg: VoiceConfig) -> Result<Self, VoiceError> {
         // rustls 0.23 はプロセス既定の CryptoProvider を要求する。未設定なら ring を導入
         // （既に設定済みなら Err が返るので無視）。
@@ -120,12 +123,9 @@ impl VoiceConnection {
                 }
                 Some(gateway::op::READY) => {
                     let d = &v["d"];
-                    let ssrc =
-                        d["ssrc"].as_u64().ok_or(VoiceError::Protocol("ready.ssrc"))? as u32;
-                    let ip =
-                        d["ip"].as_str().ok_or(VoiceError::Protocol("ready.ip"))?.to_string();
-                    let port =
-                        d["port"].as_u64().ok_or(VoiceError::Protocol("ready.port"))? as u16;
+                    let ssrc = d["ssrc"].as_u64().ok_or(VoiceError::Protocol("ready.ssrc"))? as u32;
+                    let ip = d["ip"].as_str().ok_or(VoiceError::Protocol("ready.ip"))?.to_string();
+                    let port = d["port"].as_u64().ok_or(VoiceError::Protocol("ready.port"))? as u16;
                     let modes = d["modes"]
                         .as_array()
                         .map(|a| a.iter().filter_map(|m| m.as_str().map(String::from)).collect())
@@ -181,7 +181,14 @@ impl VoiceConnection {
                 .await?;
             tracing::info!(video_ssrc, "video: op12 sent (experimental)");
         }
-        tracing::info!(guild = cfg.guild_id, mode = mode_str, ssrc, dave_version, video = cfg.video, "voice connection established");
+        tracing::info!(
+            guild = cfg.guild_id,
+            mode = mode_str,
+            ssrc,
+            dave_version,
+            video = cfg.video,
+            "voice connection established"
+        );
 
         // --- タスク起動 ---
         let cipher = Cipher::new(mode, &secret_key);
@@ -287,7 +294,7 @@ impl Drop for VoiceConnection {
 
 async fn send_json(sink: &mut WsSink, v: &Value) -> Result<(), VoiceError> {
     let txt = serde_json::to_string(v)?;
-    sink.send(Message::Text(txt.into())).await?;
+    sink.send(Message::Text(txt)).await?;
     Ok(())
 }
 
@@ -319,7 +326,11 @@ async fn next_json(stream: &mut WsStream) -> Result<Value, VoiceError> {
                     Some(f) => (u16::from(f.code), f.reason.to_string()),
                     None => (0, String::new()),
                 };
-                return Err(VoiceError::GatewayClosed { code, reason, hint: close_code_hint(code) });
+                return Err(VoiceError::GatewayClosed {
+                    code,
+                    reason,
+                    hint: close_code_hint(code),
+                });
             }
             None => return Err(VoiceError::ClosedEarly),
             Some(Ok(_)) => continue, // Binary(DAVE)/Ping/Pong/Frame は無視
@@ -344,16 +355,14 @@ async fn heartbeat_task(
     let mut ticker = tokio::time::interval(Duration::from_millis(interval_ms.max(1.0) as u64));
     loop {
         ticker.tick().await;
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+        let nonce =
+            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         let payload = gateway::heartbeat(nonce, last_seq.load(Ordering::Relaxed));
         let txt = match serde_json::to_string(&payload) {
             Ok(t) => t,
             Err(_) => continue,
         };
-        if tx.send(Message::Text(txt.into())).is_err() {
+        if tx.send(Message::Text(txt)).is_err() {
             break;
         }
     }
@@ -378,8 +387,11 @@ async fn reader_task(
         crate::dave::mls::OpenMlsBackend::new(user_id),
     );
     #[cfg(all(feature = "dave", not(feature = "dave-mls")))]
-    let mut dave =
-        crate::dave::session::DaveSession::new(user_id, dave_version, crate::dave::session::NoopMls);
+    let mut dave = crate::dave::session::DaveSession::new(
+        user_id,
+        dave_version,
+        crate::dave::session::NoopMls,
+    );
 
     // 仕様(Key Packages): dave_version >= 1 なら接続直後に op26(自分の KeyPackage)を送る。
     #[cfg(feature = "dave")]
@@ -431,7 +443,10 @@ async fn reader_task(
                                         ),
                                     );
                                 }
-                                tracing::info!(epoch = dave.epoch(), "dave: transition executed -> E2EE active (audio+video)");
+                                tracing::info!(
+                                    epoch = dave.epoch(),
+                                    "dave: transition executed -> E2EE active (audio+video)"
+                                );
                             }
                         }
                     }
@@ -439,7 +454,8 @@ async fn reader_task(
             }
             #[cfg(feature = "dave")]
             Ok(Message::Binary(b)) => {
-                if let Some((seq, opcode, payload)) = crate::dave::opcodes::parse_server_binary(&b) {
+                if let Some((seq, opcode, payload)) = crate::dave::opcodes::parse_server_binary(&b)
+                {
                     last_seq.store(seq as i64, Ordering::Relaxed);
                     tracing::info!(opcode, len = payload.len(), "dave binary opcode");
                     if opcode == 29 || opcode == 30 {
@@ -464,14 +480,22 @@ async fn reader_task(
                             if ep >= 1 {
                                 if let Some(secret) = dave.sender_secret() {
                                     if let Ok(mut guard) = dave_cryptor.lock() {
-                                        *guard = Some(crate::dave::cryptor::FrameCryptor::with_epoch(secret, ep));
+                                        *guard =
+                                            Some(crate::dave::cryptor::FrameCryptor::with_epoch(
+                                                secret, ep,
+                                            ));
                                     }
                                     if let Ok(mut vguard) = dave_video_cryptor.lock() {
                                         *vguard = Some(
-                                            crate::dave::video_frame::VideoFrameCryptor::with_epoch(secret, ep),
+                                            crate::dave::video_frame::VideoFrameCryptor::with_epoch(
+                                                secret, ep,
+                                            ),
                                         );
                                     }
-                                    tracing::info!(epoch = ep, "dave: initial transition -> E2EE active (audio+video)");
+                                    tracing::info!(
+                                        epoch = ep,
+                                        "dave: initial transition -> E2EE active (audio+video)"
+                                    );
                                 }
                             }
                         }

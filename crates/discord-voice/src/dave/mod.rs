@@ -10,16 +10,16 @@
 //! MLS グループ管理（key package/Welcome/exporter secret）は [`GroupKeySource`] で抽象化し、
 //! 実装(openmls)はフェーズ3-5c（feature = "dave-mls", 実機テスト要）。
 
-pub mod frame;
-pub mod video_frame;
-mod gcm;
 pub mod cryptor;
+pub mod frame;
+mod gcm;
+#[cfg(feature = "dave-mls")]
+pub mod mls;
 pub mod opcodes;
 pub mod ratchet;
 pub mod session;
-#[cfg(feature = "dave-mls")]
-pub mod mls;
 pub mod uleb128;
+pub mod video_frame;
 
 /// 本実装が対応する DAVE プロトコルバージョン。
 pub const PROTOCOL_VERSION: u16 = 1;

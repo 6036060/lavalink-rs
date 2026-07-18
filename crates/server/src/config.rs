@@ -7,17 +7,11 @@
 use serde::Deserialize;
 
 /// トップレベル設定。未知キー（metrics/logging 等）は serde が無視する。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     pub server: ServerConfig,
     pub lavalink: LavalinkConfig,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self { server: ServerConfig::default(), lavalink: LavalinkConfig::default() }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -176,11 +170,7 @@ pub fn load() -> Result<AppConfig, config::ConfigError> {
     config::Config::builder()
         .add_source(config::File::with_name("application.example").required(false))
         .add_source(config::File::with_name("application").required(false))
-        .add_source(
-            config::Environment::default()
-                .separator("_")
-                .ignore_empty(true),
-        )
+        .add_source(config::Environment::default().separator("_").ignore_empty(true))
         .build()?
         .try_deserialize()
 }

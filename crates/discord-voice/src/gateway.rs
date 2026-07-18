@@ -19,13 +19,7 @@ pub mod op {
 }
 
 /// op 0 Identify。`max_dave_protocol_version=0` で DAVE 非対応を明示（ADR-0001）。
-pub fn identify(
-    guild_id: u64,
-    user_id: u64,
-    session_id: &str,
-    token: &str,
-    max_dave: u8,
-) -> Value {
+pub fn identify(guild_id: u64, user_id: u64, session_id: &str, token: &str, max_dave: u8) -> Value {
     json!({
         "op": op::IDENTIFY,
         "d": {

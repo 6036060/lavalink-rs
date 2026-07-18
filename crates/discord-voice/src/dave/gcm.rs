@@ -64,7 +64,12 @@ fn setup(key: &[u8; 16], nonce: &[u8; 12]) -> (Aes128, [u8; 16], [u8; 16]) {
 }
 
 /// 暗号化して (暗号文, フル16byteタグ) を返す。
-pub fn encrypt_detached(key: &[u8; 16], nonce: &[u8; 12], aad: &[u8], pt: &[u8]) -> (Vec<u8>, [u8; 16]) {
+pub fn encrypt_detached(
+    key: &[u8; 16],
+    nonce: &[u8; 12],
+    aad: &[u8],
+    pt: &[u8],
+) -> (Vec<u8>, [u8; 16]) {
     let (aes, h, j0) = setup(key, nonce);
     let ct = ctr_xor(&aes, &j0, pt);
     let tag = gcm_tag(&aes, &h, &j0, aad, &ct);

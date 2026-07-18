@@ -29,15 +29,10 @@ pub fn build_app(state: SharedState) -> Router {
         .route("/sessions/{session_id}/players", get(routes::get_players))
         .route(
             "/sessions/{session_id}/players/{guild_id}",
-            get(routes::get_player)
-                .patch(routes::update_player)
-                .delete(routes::destroy_player),
+            get(routes::get_player).patch(routes::update_player).delete(routes::destroy_player),
         )
         .route("/websocket", get(ws::websocket))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth::require_auth));
 
-    Router::new()
-        .route("/version", get(routes::version))
-        .nest("/v4", v4)
-        .with_state(state)
+    Router::new().route("/version", get(routes::version)).nest("/v4", v4).with_state(state)
 }

@@ -19,12 +19,7 @@ pub struct Packetizer {
 
 impl Packetizer {
     pub fn new(ssrc: u32) -> Self {
-        Self {
-            ssrc,
-            sequence: rand::random(),
-            timestamp: rand::random(),
-            nonce_counter: 1,
-        }
+        Self { ssrc, sequence: rand::random(), timestamp: rand::random(), nonce_counter: 1 }
     }
 
     fn write_header(&self, buf: &mut Vec<u8>) {

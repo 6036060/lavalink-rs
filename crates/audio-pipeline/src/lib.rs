@@ -19,8 +19,8 @@ pub mod pcm;
 pub mod stream_source;
 pub mod timescale;
 
-pub use error::AudioError;
 pub use encoder::OpusEncoder;
+pub use error::AudioError;
 pub use filters::FilterChain;
 pub use mpegts::TsToAdts;
 pub use stream_source::SharedBuffer;
@@ -111,8 +111,7 @@ impl AudioPipeline {
         F: FnMut(Vec<u8>) -> bool,
     {
         let src = stream_source::StreamingSource::new(buf);
-        let mss =
-            symphonia::core::io::MediaSourceStream::new(Box::new(src), Default::default());
+        let mss = symphonia::core::io::MediaSourceStream::new(Box::new(src), Default::default());
         let mut dec = decoder::StreamDecoder::new(mss, ext_hint)?;
         let mut resampler = pcm::StreamResampler::new(dec.src_rate);
         let mut accum: Vec<f32> = Vec::new();
@@ -124,11 +123,7 @@ impl AudioPipeline {
         // 初期フィルタ / timescale を共有設定から構築。
         let (mut chain, mut timescale, mut last_ver) = {
             let g = filters.lock().unwrap();
-            (
-                FilterChain::from_filters(&g.filters),
-                Timescale::from_filters(&g.filters),
-                g.version,
-            )
+            (FilterChain::from_filters(&g.filters), Timescale::from_filters(&g.filters), g.version)
         };
 
         while let Some(stereo) = dec.next_stereo()? {

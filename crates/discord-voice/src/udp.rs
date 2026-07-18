@@ -18,6 +18,7 @@ pub async fn ip_discovery(socket: &UdpSocket, ssrc: u32) -> Result<(String, u16)
 }
 
 /// IP Discovery レスポンス（type=2）を解析する。
+#[allow(clippy::result_large_err)]
 pub fn parse_discovery_response(buf: &[u8]) -> Result<(String, u16), VoiceError> {
     if buf.len() < 74 {
         return Err(VoiceError::IpDiscovery("short response"));

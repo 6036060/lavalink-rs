@@ -40,7 +40,8 @@ pub enum CodecError {
     InvalidUtf8,
 }
 
-const B64: base64::engine::general_purpose::GeneralPurpose = base64::engine::general_purpose::STANDARD;
+const B64: base64::engine::general_purpose::GeneralPurpose =
+    base64::engine::general_purpose::STANDARD;
 
 // ------------------------------- decode -------------------------------
 
@@ -209,7 +210,8 @@ impl<'a> Reader<'a> {
                 }
                 let b = bytes[i + 1];
                 let c = bytes[i + 2];
-                units.push(((a as u16 & 0x0F) << 12) | ((b as u16 & 0x3F) << 6) | (c as u16 & 0x3F));
+                units
+                    .push(((a as u16 & 0x0F) << 12) | ((b as u16 & 0x3F) << 6) | (c as u16 & 0x3F));
                 i += 3;
             }
         }

@@ -107,13 +107,13 @@ fn rd(buf: &[f32], origin: i64, abs: i64, ch: usize) -> f32 {
 /// WSOLA（Waveform Similarity Overlap-Add）タイムストレッチ。
 /// `factor = 出力長 / 入力長`。ピッチは変えずにテンポ（長さ）だけ変える。
 struct Wsola {
-    ana_hop: f64,      // 解析ホップ = HOP / factor
-    buf: Vec<f32>,     // 未処理の入力（ステレオインターリーブ）
-    origin: i64,       // buf[0] の絶対 1ch フレーム位置
-    ana_pos: f64,      // 解析位置（絶対, フラクショナル）
-    prev_pos: i64,     // 直前に採用したグレインの開始位置（絶対）
-    acc: Vec<f32>,     // OLA 累積（index0 = 次に出力するサンプル, ステレオ）
-    hann: Vec<f32>,    // 長さ WIN の周期 Hann 窓（50% OLA で利得 1）
+    ana_hop: f64,   // 解析ホップ = HOP / factor
+    buf: Vec<f32>,  // 未処理の入力（ステレオインターリーブ）
+    origin: i64,    // buf[0] の絶対 1ch フレーム位置
+    ana_pos: f64,   // 解析位置（絶対, フラクショナル）
+    prev_pos: i64,  // 直前に採用したグレインの開始位置（絶対）
+    acc: Vec<f32>,  // OLA 累積（index0 = 次に出力するサンプル, ステレオ）
+    hann: Vec<f32>, // 長さ WIN の周期 Hann 窓（50% OLA で利得 1）
     started: bool,
 }
 
@@ -159,7 +159,8 @@ impl Wsola {
             let buf_end = self.origin + (self.buf.len() / 2) as i64; // 排他的上限
             let base = self.ana_pos.round() as i64;
             // 読みに必要な絶対上限（グレイン探索 + ターゲット）。
-            let need = (base + SEARCH as i64 + WIN as i64).max(self.prev_pos + HOP as i64 + OV as i64);
+            let need =
+                (base + SEARCH as i64 + WIN as i64).max(self.prev_pos + HOP as i64 + OV as i64);
             if final_flush {
                 // 終端: 実入力を越えてグレインを置く必要が出たら終了。
                 if base - SEARCH as i64 >= buf_end {
@@ -274,11 +275,7 @@ mod tests {
 
     fn filters_with(speed: f32, pitch: f32, rate: f32) -> Filters {
         Filters {
-            timescale: Some(TsDto {
-                speed: Some(speed),
-                pitch: Some(pitch),
-                rate: Some(rate),
-            }),
+            timescale: Some(TsDto { speed: Some(speed), pitch: Some(pitch), rate: Some(rate) }),
             ..Default::default()
         }
     }

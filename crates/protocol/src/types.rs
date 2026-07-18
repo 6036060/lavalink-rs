@@ -89,7 +89,10 @@ impl LoadResult {
         Self { load_type: LoadType::Playlist, data: serde_json::to_value(p).unwrap_or(Value::Null) }
     }
     pub fn search(tracks: Vec<Track>) -> Self {
-        Self { load_type: LoadType::Search, data: serde_json::to_value(tracks).unwrap_or(Value::Null) }
+        Self {
+            load_type: LoadType::Search,
+            data: serde_json::to_value(tracks).unwrap_or(Value::Null),
+        }
     }
     pub fn empty() -> Self {
         Self { load_type: LoadType::Empty, data: Value::Null }

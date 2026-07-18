@@ -38,12 +38,7 @@ pub struct H264Packetizer {
 
 impl H264Packetizer {
     pub fn new(ssrc: u32) -> Self {
-        Self {
-            ssrc,
-            sequence: rand::random(),
-            timestamp: rand::random(),
-            nonce_counter: 1,
-        }
+        Self { ssrc, sequence: rand::random(), timestamp: rand::random(), nonce_counter: 1 }
     }
 
     /// フレームレートに応じて timestamp を進める (次のフレームへ)。
@@ -102,15 +97,12 @@ impl H264Packetizer {
                 for (ci, chunk) in chunks.into_iter().enumerate() {
                     let start = ci == 0;
                     let end = ci + 1 == n;
-                    let fu_header =
-                        ((start as u8) << 7) | ((end as u8) << 6) | nal_type;
+                    let fu_header = ((start as u8) << 7) | ((end as u8) << 6) | nal_type;
                     let mut payload = Vec::with_capacity(2 + chunk.len());
                     payload.push(indicator);
                     payload.push(fu_header);
                     payload.extend_from_slice(chunk);
-                    if let Some(p) =
-                        self.build_packet(cipher, &payload, last_nal && end)
-                    {
+                    if let Some(p) = self.build_packet(cipher, &payload, last_nal && end) {
                         out.push(p);
                     }
                 }
@@ -227,8 +219,7 @@ mod tests {
         let mut reassembled: Vec<u8> = Vec::new();
         for pkt in &pkts {
             let aad = &pkt[..12];
-            let nonce =
-                u32::from_be_bytes(pkt[pkt.len() - 4..].try_into().unwrap());
+            let nonce = u32::from_be_bytes(pkt[pkt.len() - 4..].try_into().unwrap());
             let ct = &pkt[12..pkt.len() - 4];
             let payload = c.decrypt(nonce, aad, ct).expect("decrypt");
             let indicator = payload[0];

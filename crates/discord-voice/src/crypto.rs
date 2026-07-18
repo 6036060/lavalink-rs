@@ -106,9 +106,7 @@ mod tests {
         let dec = XChaCha20Poly1305::new_from_slice(&key).unwrap();
         let mut nonce = [0u8; 24];
         nonce[0..4].copy_from_slice(&42u32.to_be_bytes());
-        let pt = dec
-            .decrypt(XNonce::from_slice(&nonce), Payload { msg: &ct, aad: &aad })
-            .unwrap();
+        let pt = dec.decrypt(XNonce::from_slice(&nonce), Payload { msg: &ct, aad: &aad }).unwrap();
         assert_eq!(pt, b"opus-frame");
     }
 
@@ -121,9 +119,7 @@ mod tests {
         let dec = Aes256Gcm::new_from_slice(&key).unwrap();
         let mut nonce = [0u8; 12];
         nonce[0..4].copy_from_slice(&1u32.to_be_bytes());
-        let pt = dec
-            .decrypt(Nonce::from_slice(&nonce), Payload { msg: &ct, aad: &aad })
-            .unwrap();
+        let pt = dec.decrypt(Nonce::from_slice(&nonce), Payload { msg: &ct, aad: &aad }).unwrap();
         assert_eq!(pt, b"hello");
     }
 }

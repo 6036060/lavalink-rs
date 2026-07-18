@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 use lavalink_protocol::{Event, ServerMessage, TrackEndReason};
 
 use crate::routes::build_stats;
-use crate::state::{SharedState, Session, Tx};
+use crate::state::{Session, SharedState, Tx};
 
 fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
@@ -53,7 +53,12 @@ async fn get_or_create(
     (sess, false)
 }
 
-async fn handle_socket(socket: WebSocket, state: SharedState, user_id: String, resume_id: Option<String>) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: SharedState,
+    user_id: String,
+    resume_id: Option<String>,
+) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
 
@@ -73,10 +78,7 @@ async fn handle_socket(socket: WebSocket, state: SharedState, user_id: String, r
     });
 
     // Ready op を送信。
-    session.send(ServerMessage::Ready {
-        resumed,
-        session_id: session.id.clone(),
-    });
+    session.send(ServerMessage::Ready { resumed, session_id: session.id.clone() });
     tracing::info!(session_id = %session.id, user_id = %session.user_id, resumed, "websocket connected");
 
     // 受信ループ（v4 ではクライアントからの制御はないため close 待ち）。
@@ -121,11 +123,7 @@ pub async fn dispatcher(state: SharedState) {
         secs += 1;
         let interval = state.config.lavalink.server.player_update_interval.max(1);
 
-        let stats = if secs % 60 == 0 {
-            Some(build_stats(&state).await)
-        } else {
-            None
-        };
+        let stats = if secs % 60 == 0 { Some(build_stats(&state).await) } else { None };
 
         let sessions: Vec<Arc<Session>> = state.sessions.read().await.values().cloned().collect();
         for sess in sessions {

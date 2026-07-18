@@ -95,7 +95,7 @@ impl Playback {
             token: voice.token.clone(),
             endpoint: voice.endpoint.clone(),
             // 映像 (実験的): LAVALINK_VIDEO=1 でオプトイン (docs/video-streaming-plan.md)
-            video: std::env::var("LAVALINK_VIDEO").map_or(false, |v| v == "1"),
+            video: std::env::var("LAVALINK_VIDEO").is_ok_and(|v| v == "1"),
         };
         match VoiceConnection::connect(cfg).await {
             Ok(c) => {
@@ -263,6 +263,7 @@ impl Playback {
 /// - `dl_slot`: ダウンロード共有スロット。あれば**再ダウンロードせず**同じバッファから
 ///   デコードし直す。seek 後の長い無音（先頭からの再ダウンロード待ち）はこれで解消する。
 ///   Direct のダウンロードはデコード停止と独立に走り続けるので、seek を挟んでも進捗が残る。
+#[allow(clippy::too_many_arguments)]
 async fn stream_track(
     tx: &tokio::sync::mpsc::Sender<Vec<u8>>,
     track: &Track,
@@ -354,11 +355,8 @@ async fn stream_track(
                     }
                     buf_dl.lock().unwrap().finish();
                 });
-                *dl_slot.lock().unwrap() = Some(SharedDl {
-                    buf: buf.clone(),
-                    ext: ext.clone(),
-                    stop: dl_stop,
-                });
+                *dl_slot.lock().unwrap() =
+                    Some(SharedDl { buf: buf.clone(), ext: ext.clone(), stop: dl_stop });
                 (ext, buf, None)
             }
             ResolvedUrl::Hls { url: manifest_url, user_agent } => {
@@ -442,16 +440,7 @@ async fn stream_track(
 // ----------------------------- HLS（ライブ配信） -----------------------------
 
 async fn http_text(client: &reqwest::Client, url: &str) -> Option<String> {
-    client
-        .get(url)
-        .send()
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .text()
-        .await
-        .ok()
+    client.get(url).send().await.ok()?.error_for_status().ok()?.text().await.ok()
 }
 
 /// HLS ダウンロードタスク（主に YouTube ライブ）。

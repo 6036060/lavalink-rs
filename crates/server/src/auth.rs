@@ -18,10 +18,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 pub async fn require_auth(State(state): State<SharedState>, req: Request, next: Next) -> Response {
-    let provided = req
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok());
+    let provided = req.headers().get("authorization").and_then(|v| v.to_str().ok());
     let expected = state.config.lavalink.server.password.as_str();
 
     if provided.is_some_and(|p| constant_time_eq(p.as_bytes(), expected.as_bytes())) {

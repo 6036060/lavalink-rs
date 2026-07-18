@@ -213,15 +213,17 @@ pub fn decrypt_h264(key: &[u8; 16], frame: &[u8]) -> Result<Vec<u8>, FrameError>
     let ranges_end = l - 3;
     let mut unenc_ranges: Vec<(u64, u64)> = Vec::new();
     while p < ranges_end {
-        let (off, a) = uleb128::decode(&frame[p..ranges_end]).ok_or(FrameError::NotProtocolFrame)?;
+        let (off, a) =
+            uleb128::decode(&frame[p..ranges_end]).ok_or(FrameError::NotProtocolFrame)?;
         p += a;
-        let (size, b) = uleb128::decode(&frame[p..ranges_end]).ok_or(FrameError::NotProtocolFrame)?;
+        let (size, b) =
+            uleb128::decode(&frame[p..ranges_end]).ok_or(FrameError::NotProtocolFrame)?;
         p += b;
         unenc_ranges.push((off, size));
     }
 
     let body = &frame[..suppl_start]; // interleaved frame
-    // 平文レンジ (AAD) と暗号文を body から分離する。
+                                      // 平文レンジ (AAD) と暗号文を body から分離する。
     let mut aad: Vec<u8> = Vec::new();
     let mut ciphertext: Vec<u8> = Vec::new();
     let mut enc_positions: Vec<(usize, usize)> = Vec::new();
@@ -245,7 +247,8 @@ pub fn decrypt_h264(key: &[u8; 16], frame: &[u8]) -> Result<Vec<u8>, FrameError>
     }
 
     let full = full_nonce(nonce_val as u32);
-    let plain = gcm::decrypt_trunc8(key, &full, &aad, &ciphertext, tag8).ok_or(FrameError::Crypto)?;
+    let plain =
+        gcm::decrypt_trunc8(key, &full, &aad, &ciphertext, tag8).ok_or(FrameError::Crypto)?;
 
     // 復号平文を暗号化位置へ戻して元フレームを再構成。
     let mut out = body.to_vec();
@@ -331,11 +334,8 @@ mod tests {
 
         let dec = decrypt_h264(&key, &enc).unwrap();
         // 復号すると正規化フレーム (全スタートコード 4byte) が戻る。
-        let normalized = annexb(&[
-            (true, &[0x67, 0x42, 0x00]),
-            (true, &[0x68, 0xCE]),
-            (true, &idr),
-        ]);
+        let normalized =
+            annexb(&[(true, &[0x67, 0x42, 0x00]), (true, &[0x68, 0xCE]), (true, &idr)]);
         assert_eq!(dec, normalized);
     }
 

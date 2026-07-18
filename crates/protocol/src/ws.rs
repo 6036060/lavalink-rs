@@ -3,9 +3,11 @@
 
 use serde::Serialize;
 
-use crate::types::{PlayerState, Stats, Track, Exception};
+use crate::types::{Exception, PlayerState, Stats, Track};
 
 /// `op` で内部タグ付けされたサーバー→クライアント メッセージ。
+// バリアント間のサイズ差は許容（送信専用でヒープ化のコストに見合わない）。
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 pub enum ServerMessage {

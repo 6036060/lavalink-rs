@@ -1,6 +1,10 @@
 //! Lavalink 互換のエラーレスポンス（チケット: REST 共通）。
 
-use axum::{http::StatusCode, response::{IntoResponse, Response}, Json};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Lavalink のエラー JSON を返すエラー型。
@@ -28,10 +32,8 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+        let ts =
+            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         let body = serde_json::json!({
             "timestamp": ts,
             "status": self.status.as_u16(),

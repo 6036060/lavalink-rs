@@ -70,7 +70,7 @@ impl MockPlayer {
     /// 終了とみなす位置（endTime 指定があればそれ、無ければ length）。
     fn effective_end_ms(&self) -> u64 {
         match self.end_time_ms {
-            Some(e) => e.min(self.length_ms()).max(0),
+            Some(e) => e.min(self.length_ms()),
             None => self.length_ms(),
         }
     }
@@ -124,11 +124,8 @@ impl MockPlayer {
 
     pub fn seek(&mut self, position_ms: u64) {
         // トラックがあれば length を超えない位置にクランプする。
-        self.position_base_ms = if self.track.is_some() {
-            position_ms.min(self.length_ms())
-        } else {
-            position_ms
-        };
+        self.position_base_ms =
+            if self.track.is_some() { position_ms.min(self.length_ms()) } else { position_ms };
         self.playing_since = if self.is_active() { Some(Instant::now()) } else { None };
     }
 
@@ -167,10 +164,8 @@ impl MockPlayer {
     // ----- スナップショット -----
 
     pub fn state(&self) -> PlayerState {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+        let now =
+            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         let connected = self.connected();
         PlayerState {
             time: now,
