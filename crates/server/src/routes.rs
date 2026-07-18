@@ -351,6 +351,114 @@ fn decode_to_track(encoded: &str, user_data: Option<serde_json::Value>) -> Track
     }
 }
 
+/// Filters の各パラメータを公式仕様 (https://lavalink.dev/api/rest#filters) の
+/// 範囲で検証する。範囲外は 400 を返す（本家 Lavalink 互換）。
+fn validate_filters(f: &Filters) -> Result<(), String> {
+    if let Some(v) = f.volume {
+        if !(0.0..=5.0).contains(&v) {
+            return Err(format!("volume must be within 0.0 to 5.0: {v}"));
+        }
+    }
+    if let Some(eq) = &f.equalizer {
+        for b in eq {
+            if b.band > 14 {
+                return Err(format!("equalizer band must be within 0 to 14: {}", b.band));
+            }
+            if !(-0.25..=1.0).contains(&b.gain) {
+                return Err(format!("equalizer gain must be within -0.25 to 1.0: {}", b.gain));
+            }
+        }
+    }
+    if let Some(k) = &f.karaoke {
+        for (name, v) in [("level", k.level), ("monoLevel", k.mono_level)] {
+            if let Some(v) = v {
+                if !(0.0..=1.0).contains(&v) {
+                    return Err(format!("karaoke {name} must be within 0.0 to 1.0: {v}"));
+                }
+            }
+        }
+    }
+    if let Some(ts) = &f.timescale {
+        for (name, v) in [("speed", ts.speed), ("pitch", ts.pitch), ("rate", ts.rate)] {
+            if let Some(v) = v {
+                if v < 0.0 {
+                    return Err(format!("timescale {name} must be greater than or equal to 0.0: {v}"));
+                }
+            }
+        }
+    }
+    if let Some(t) = &f.tremolo {
+        if let Some(freq) = t.frequency {
+            if freq <= 0.0 {
+                return Err(format!("tremolo frequency must be greater than 0.0: {freq}"));
+            }
+        }
+        if let Some(d) = t.depth {
+            if d <= 0.0 || d > 1.0 {
+                return Err(format!("tremolo depth must be within 0.0 (exclusive) to 1.0: {d}"));
+            }
+        }
+    }
+    if let Some(v) = &f.vibrato {
+        if let Some(freq) = v.frequency {
+            if freq <= 0.0 || freq > 14.0 {
+                return Err(format!(
+                    "vibrato frequency must be within 0.0 (exclusive) to 14.0: {freq}"
+                ));
+            }
+        }
+        if let Some(d) = v.depth {
+            if d <= 0.0 || d > 1.0 {
+                return Err(format!("vibrato depth must be within 0.0 (exclusive) to 1.0: {d}"));
+            }
+        }
+    }
+    if let Some(cm) = &f.channel_mix {
+        for (name, v) in [
+            ("leftToLeft", cm.left_to_left),
+            ("leftToRight", cm.left_to_right),
+            ("rightToLeft", cm.right_to_left),
+            ("rightToRight", cm.right_to_right),
+        ] {
+            if let Some(v) = v {
+                if !(0.0..=1.0).contains(&v) {
+                    return Err(format!("channelMix {name} must be within 0.0 to 1.0: {v}"));
+                }
+            }
+        }
+    }
+    // lowPass: smoothing ≤ 1.0 は「無効化」の意味なので不正値ではない（仕様どおり）。
+    // rotation / distortion: 仕様上の範囲制限なし。
+    Ok(())
+}
+
+/// 設定 (`lavalink.server.filters`) で無効化されているのに使われたフィルタ名を返す。
+fn disabled_filters_used(f: &Filters, cfg: &crate::config::Filters) -> Vec<&'static str> {
+    let mut used = Vec::new();
+    if f.volume.is_some() && !cfg.volume { used.push("volume"); }
+    if f.equalizer.is_some() && !cfg.equalizer { used.push("equalizer"); }
+    if f.karaoke.is_some() && !cfg.karaoke { used.push("karaoke"); }
+    if f.timescale.is_some() && !cfg.timescale { used.push("timescale"); }
+    if f.tremolo.is_some() && !cfg.tremolo { used.push("tremolo"); }
+    if f.vibrato.is_some() && !cfg.vibrato { used.push("vibrato"); }
+    if f.distortion.is_some() && !cfg.distortion { used.push("distortion"); }
+    if f.rotation.is_some() && !cfg.rotation { used.push("rotation"); }
+    if f.channel_mix.is_some() && !cfg.channel_mix { used.push("channelMix"); }
+    if f.low_pass.is_some() && !cfg.low_pass { used.push("lowPass"); }
+    used
+}
+
+/// プレイヤー音量（0-1000, 100=等倍）をフィルタ音量へ合成した「実効フィルタ」を返す。
+/// 音声パイプラインへ渡す用（REST が返す filters には player volume を混ぜない）。
+fn effective_filters(filters: &Filters, volume: u16) -> Filters {
+    let mut f = filters.clone();
+    let gain = f32::from(volume) / 100.0;
+    if (gain - 1.0).abs() > f32::EPSILON {
+        f.volume = Some(f.volume.unwrap_or(1.0) * gain);
+    }
+    f
+}
+
 pub async fn update_player(
     Path((session_id, guild_id)): Path<(String, String)>,
     Query(nr): Query<NoReplaceQuery>,
@@ -358,6 +466,25 @@ pub async fn update_player(
     Json(req): Json<UpdatePlayerRequest>,
 ) -> ApiResult<Json<Player>> {
     let path = format!("/v4/sessions/{session_id}/players/{guild_id}");
+
+    // フィルタのパラメータ範囲を公式仕様どおり検証し、
+    // 設定で無効化されたフィルタの使用も 400（本家 Lavalink 互換）。
+    if let Some(filters) = &req.filters {
+        if let Err(msg) = validate_filters(filters) {
+            return Err(ApiError::bad_request(msg, path));
+        }
+        let disabled = disabled_filters_used(filters, &state.config.lavalink.server.filters);
+        if !disabled.is_empty() {
+            return Err(ApiError::bad_request(
+                format!(
+                    "The following filters are disabled in the config: {}",
+                    disabled.join(", ")
+                ),
+                path,
+            ));
+        }
+    }
+
     let session = state
         .get_session(&session_id)
         .await
@@ -369,6 +496,8 @@ pub async fn update_player(
     let mut do_stop_playback = false;
     let mut set_paused_to: Option<bool> = None;
     let mut filters_changed = false;
+    let mut volume_changed = false;
+    let mut seek_to: Option<u64> = None;
 
     let player_json = {
         let mut players = session.players.lock().await;
@@ -383,6 +512,11 @@ pub async fn update_player(
                 if already_playing && nr.no_replace {
                     // noReplace: 再生中なら新トラックを無視。
                 } else {
+                    tracing::info!(
+                        %guild_id,
+                        title = %track.info.title,
+                        "player PATCH: play"
+                    );
                     if let Some(old) = entry.stop() {
                         session.send(ServerMessage::Event(Event::TrackEnd {
                             guild_id: guild_id.clone(),
@@ -400,6 +534,7 @@ pub async fn update_player(
                 }
             }
             TrackAction::Stop => {
+                tracing::info!(%guild_id, "player PATCH: stop");
                 if let Some(old) = entry.stop() {
                     session.send(ServerMessage::Event(Event::TrackEnd {
                         guild_id: guild_id.clone(),
@@ -416,20 +551,33 @@ pub async fn update_player(
         // --- その他フィールド（部分更新）---
         if let Some(voice) = req.voice {
             if voice.is_complete() {
-                connect_voice = Some(voice.clone());
-                // dev: playfile が自動で読む voice.env を書き出す（token を含むので本番では無効化）。
-                let content = format!(
-                    "GUILD_ID={}\nUSER_ID={}\nSESSION_ID={}\nVOICE_TOKEN={}\nVOICE_ENDPOINT={}\n",
-                    guild_id, session.user_id, voice.session_id, voice.token, voice.endpoint
-                );
-                if std::fs::write("voice.env", content).is_ok() {
-                    tracing::info!("wrote voice.env -> run: cargo run -p lavalink-playfile -- <FILE>");
+                // dev: playfile が自動で読む voice.env を書き出す。voice token を平文で
+                // ディスクに残すため、明示オプトイン（LAVALINK_WRITE_VOICE_ENV=1）時のみ。
+                if std::env::var("LAVALINK_WRITE_VOICE_ENV").map_or(false, |v| v == "1") {
+                    let content = format!(
+                        "GUILD_ID={}\nUSER_ID={}\nSESSION_ID={}\nVOICE_TOKEN={}\nVOICE_ENDPOINT={}\n",
+                        guild_id, session.user_id, voice.session_id, voice.token, voice.endpoint
+                    );
+                    if std::fs::write("voice.env", content).is_ok() {
+                        tracing::info!("wrote voice.env -> run: cargo run -p lavalink-playfile -- <FILE>");
+                    }
+                }
+                // playfile 等の外部ツールでこのセッションを使う場合、サーバー自身は
+                // 接続しない（同一セッションの二重接続を防ぎ 4006 を回避）。
+                if std::env::var("LAVALINK_SKIP_VOICE_CONNECT").map_or(false, |v| v == "1") {
+                    tracing::warn!(
+                        "LAVALINK_SKIP_VOICE_CONNECT=1: サーバーは voice 接続をスキップします \
+                         (voice.env を playfile 等で使うテスト用)。音声再生はされません。"
+                    );
+                } else {
+                    connect_voice = Some(voice.clone());
                 }
             }
             entry.set_voice(voice);
         }
         if let Some(volume) = req.volume {
             entry.set_volume(volume);
+            volume_changed = true;
         }
         if let Some(paused) = req.paused {
             entry.set_paused(paused);
@@ -443,34 +591,42 @@ pub async fn update_player(
             entry.set_end_time(end_time.map(|e| e as u64));
         }
         if let Some(position) = req.position {
-            entry.seek(position.max(0) as u64);
+            let pos = position.max(0) as u64;
+            entry.seek(pos);
+            // トラックが無いのに実再生を開き直さない (終了後の position PATCH 対策)
+            if entry.has_track() {
+                seek_to = Some(pos);
+            }
         }
 
         let pj = entry.to_player();
         if let Some((_, f)) = start_play.as_mut() {
-            *f = pj.filters.clone();
+            // プレイヤー音量も合成して音声パイプラインへ渡す。
+            *f = effective_filters(&pj.filters, pj.volume);
         }
         pj
     };
 
-    // 再生中フィルタのライブ適用は、トラックを新規開始しない場合のみ（開始時は play 側が反映）。
-    let apply_filters = if filters_changed && start_play.is_none() {
-        Some(player_json.filters.clone())
+    // 再生中フィルタ/音量のライブ適用は、トラックを新規開始しない場合のみ
+    // （開始時は play 側が反映）。volume はフィルタ音量へ合成して適用する。
+    let apply_filters = if (filters_changed || volume_changed) && start_play.is_none() {
+        Some(effective_filters(&player_json.filters, player_json.volume))
     } else {
         None
     };
 
-    // --- 実再生制御（voice 接続 / 再生 / 停止 / 一時停止 / フィルタ）---
+    // --- 実再生制御（voice 接続 / 再生 / 停止 / 一時停止 / シーク / フィルタ）---
     if connect_voice.is_some()
         || start_play.is_some()
         || do_stop_playback
         || set_paused_to.is_some()
         || apply_filters.is_some()
+        || seek_to.is_some()
     {
         match (guild_id.parse::<u64>(), session.user_id.parse::<u64>()) {
             (Ok(guild_u64), Ok(user_u64)) => {
                 let mut pbs = session.playbacks.lock().await;
-                // 接続/再生開始時のみ Playback を生成。pause/filters だけなら既存を操作する。
+                // 接続/再生開始時のみ Playback を生成。pause/seek/filters だけなら既存を操作する。
                 let needs_create = connect_voice.is_some() || start_play.is_some();
                 let pb_opt = if needs_create {
                     Some(pbs.entry(guild_id.clone()).or_insert_with(|| {
@@ -484,7 +640,9 @@ pub async fn update_player(
                         pb.connect(voice).await;
                     }
                     if let Some((track, filters)) = start_play {
-                        pb.play(track, filters, session.clone(), state.youtube.clone());
+                        // 新トラックに position が同時指定されていればその位置から開始。
+                        let start_ms = seek_to.take().unwrap_or(0);
+                        pb.play(track, filters, session.clone(), state.youtube.clone(), start_ms);
                     } else if do_stop_playback {
                         pb.stop();
                     }
@@ -493,6 +651,9 @@ pub async fn update_player(
                     }
                     if let Some(filters) = apply_filters {
                         pb.set_filters(filters);
+                    }
+                    if let Some(pos) = seek_to {
+                        pb.seek(pos);
                     }
                 }
             }
@@ -516,4 +677,90 @@ pub async fn destroy_player(
     // 再生も停止（Playback の Drop で voice 接続/タスクが落ちる）。
     session.playbacks.lock().await.remove(&guild_id);
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lavalink_protocol::{ChannelMix, Equalizer, Tremolo, Vibrato};
+
+    #[test]
+    fn validate_accepts_spec_examples() {
+        // 公式ドキュメントの Example Payload 相当。
+        let f = Filters {
+            volume: Some(1.0),
+            equalizer: Some(vec![Equalizer { band: 0, gain: 0.2 }]),
+            tremolo: Some(Tremolo { frequency: Some(2.0), depth: Some(0.5) }),
+            vibrato: Some(Vibrato { frequency: Some(2.0), depth: Some(0.5) }),
+            channel_mix: Some(ChannelMix {
+                left_to_left: Some(1.0),
+                left_to_right: Some(0.0),
+                right_to_left: Some(0.0),
+                right_to_right: Some(1.0),
+            }),
+            ..Default::default()
+        };
+        assert!(validate_filters(&f).is_ok());
+        assert!(validate_filters(&Filters::default()).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_out_of_range() {
+        // volume > 5.0
+        let f = Filters { volume: Some(5.5), ..Default::default() };
+        assert!(validate_filters(&f).is_err());
+        // equalizer band > 14 / gain < -0.25
+        let f = Filters {
+            equalizer: Some(vec![Equalizer { band: 15, gain: 0.0 }]),
+            ..Default::default()
+        };
+        assert!(validate_filters(&f).is_err());
+        let f = Filters {
+            equalizer: Some(vec![Equalizer { band: 0, gain: -0.5 }]),
+            ..Default::default()
+        };
+        assert!(validate_filters(&f).is_err());
+        // tremolo frequency <= 0 / depth > 1
+        let f = Filters {
+            tremolo: Some(Tremolo { frequency: Some(0.0), depth: Some(0.5) }),
+            ..Default::default()
+        };
+        assert!(validate_filters(&f).is_err());
+        let f = Filters {
+            tremolo: Some(Tremolo { frequency: Some(2.0), depth: Some(1.5) }),
+            ..Default::default()
+        };
+        assert!(validate_filters(&f).is_err());
+        // vibrato frequency > 14
+        let f = Filters {
+            vibrato: Some(Vibrato { frequency: Some(15.0), depth: Some(0.5) }),
+            ..Default::default()
+        };
+        assert!(validate_filters(&f).is_err());
+        // channelMix > 1.0
+        let f = Filters {
+            channel_mix: Some(ChannelMix {
+                left_to_left: Some(1.5),
+                left_to_right: None,
+                right_to_left: None,
+                right_to_right: None,
+            }),
+            ..Default::default()
+        };
+        assert!(validate_filters(&f).is_err());
+    }
+
+    #[test]
+    fn effective_filters_merges_player_volume() {
+        // player volume 200% × filter volume 0.5 → 実効 1.0
+        let f = Filters { volume: Some(0.5), ..Default::default() };
+        let eff = effective_filters(&f, 200);
+        assert!((eff.volume.unwrap() - 1.0).abs() < 1e-6);
+        // volume 100% はフィルタをそのまま透過
+        let eff = effective_filters(&f, 100);
+        assert!((eff.volume.unwrap() - 0.5).abs() < 1e-6);
+        // フィルタ volume 未指定でも player volume は反映
+        let eff = effective_filters(&Filters::default(), 50);
+        assert!((eff.volume.unwrap() - 0.5).abs() < 1e-6);
+    }
 }

@@ -14,6 +14,7 @@ pub mod decoder;
 pub mod encoder;
 pub mod error;
 pub mod filters;
+pub mod mpegts;
 pub mod pcm;
 pub mod stream_source;
 pub mod timescale;
@@ -21,6 +22,7 @@ pub mod timescale;
 pub use error::AudioError;
 pub use encoder::OpusEncoder;
 pub use filters::FilterChain;
+pub use mpegts::TsToAdts;
 pub use stream_source::SharedBuffer;
 pub use timescale::Timescale;
 
@@ -92,6 +94,9 @@ impl AudioPipeline {
     /// timescale→フィルタ→Opus し、20ms フレームごとに `on_frame` を呼ぶ。`on_frame` が
     /// `false` を返したら停止する。全曲をメモリに溜めずに逐次送出できる。
     ///
+    /// `skip_ms` は先頭からのスキップ量（seek 用）。リサンプル・エンコードより手前の
+    /// デコード直後で安価に読み捨てるため、長距離シークでも数秒で追いつく。
+    ///
     /// `filters` は再生中にライブ更新できる共有設定。`version` が変わるとフィルタチェーンと
     /// timescale を作り直す（一時停止やピッチ/速度/音量の変更が即座に反映される）。
     pub fn decode_stream_to_opus<F>(
@@ -99,6 +104,7 @@ impl AudioPipeline {
         buf: std::sync::Arc<std::sync::Mutex<SharedBuffer>>,
         ext_hint: Option<&str>,
         filters: std::sync::Arc<std::sync::Mutex<SharedFilters>>,
+        skip_ms: u64,
         mut on_frame: F,
     ) -> Result<(), AudioError>
     where
@@ -111,6 +117,10 @@ impl AudioPipeline {
         let mut resampler = pcm::StreamResampler::new(dec.src_rate);
         let mut accum: Vec<f32> = Vec::new();
 
+        // seek: ソースレートのステレオサンプル数に換算してデコード直後に読み捨てる。
+        let mut skip_samples: usize =
+            (skip_ms as usize * dec.src_rate as usize / 1000).saturating_mul(2);
+
         // 初期フィルタ / timescale を共有設定から構築。
         let (mut chain, mut timescale, mut last_ver) = {
             let g = filters.lock().unwrap();
@@ -122,6 +132,18 @@ impl AudioPipeline {
         };
 
         while let Some(stereo) = dec.next_stereo()? {
+            // スキップ区間の読み捨て（デコードのみで先へ進むので高速）。
+            let stereo = if skip_samples > 0 {
+                if skip_samples >= stereo.len() {
+                    skip_samples -= stereo.len();
+                    continue;
+                }
+                let rest = stereo[skip_samples..].to_vec();
+                skip_samples = 0;
+                rest
+            } else {
+                stereo
+            };
             // ライブ更新の取り込み（バージョン変化時のみ作り直し）。
             {
                 let g = filters.lock().unwrap();

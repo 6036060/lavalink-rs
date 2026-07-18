@@ -22,6 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         session_id: env("SESSION_ID"),
         token: env("VOICE_TOKEN"),
         endpoint: env("VOICE_ENDPOINT"),
+        video: false,
     };
     println!("connecting to voice endpoint {} ...", cfg.endpoint);
     let conn = VoiceConnection::connect(cfg).await?;

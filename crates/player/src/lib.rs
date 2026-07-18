@@ -123,7 +123,12 @@ impl MockPlayer {
     }
 
     pub fn seek(&mut self, position_ms: u64) {
-        self.position_base_ms = position_ms.min(self.length_ms().max(position_ms));
+        // トラックがあれば length を超えない位置にクランプする。
+        self.position_base_ms = if self.track.is_some() {
+            position_ms.min(self.length_ms())
+        } else {
+            position_ms
+        };
         self.playing_since = if self.is_active() { Some(Instant::now()) } else { None };
     }
 

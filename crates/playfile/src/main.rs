@@ -1,12 +1,17 @@
-//! ローカル音声ファイルの再生/書き出しツール。
+//! ローカル音声/映像ファイルの再生/書き出しツール。
 //!
-//! 2 つのモード:
+//! 3 つのモード:
 //!   (1) WAV 書き出し（Discord 不要・確実に耳で確認）:
 //!         cargo run -p lavalink-playfile -- input.m4a output.wav
 //!   (2) Discord VC へ送出（v0, voice.env の音声情報を使用）:
 //!         cargo run -p lavalink-playfile -- input.m4a
+//!   (3) 映像テスト送出（実験的, .h264 = Annex-B 生ストリーム）:
+//!         ffmpeg -i input.mp4 -an -c:v libx264 -profile:v baseline -pix_fmt yuv420p \
+//!                -g 30 -bsf:v h264_mp4toannexb out.h264
+//!         cargo run -p lavalink-playfile -- out.h264      (VIDEO_FPS=30 が既定)
 //!
-//! 音声情報(モード2)は voice.env(サーバーが /play 時に出力) を自動で読む。env が優先。
+//! 音声情報(モード2/3)は voice.env を自動で読む (サーバーを LAVALINK_WRITE_VOICE_ENV=1 で
+//! 起動して /play すると出力される)。環境変数が優先。
 
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
@@ -15,7 +20,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use lavalink_audio_pipeline::{decoder, AudioPipeline};
-use lavalink_discord_voice::{VoiceConfig, VoiceConnection};
+use lavalink_discord_voice::{split_annex_b, VideoFrame, VoiceConfig, VoiceConnection};
 use lavalink_protocol::Filters;
 
 fn pick(file: &HashMap<String, String>, key: &str) -> anyhow::Result<String> {
@@ -82,13 +87,64 @@ async fn main() -> anyhow::Result<()> {
         }
         println!("loaded voice.env ({} keys)", file_vals.len());
     }
+    // 映像テストモードかどうか (Annex-B 生 H264)
+    let video_mode = matches!(ext.as_deref(), Some("h264") | Some("264"));
     let cfg = VoiceConfig {
         guild_id: pick(&file_vals, "GUILD_ID")?.parse()?,
         user_id: pick(&file_vals, "USER_ID")?.parse()?,
         session_id: pick(&file_vals, "SESSION_ID")?,
         token: pick(&file_vals, "VOICE_TOKEN")?,
         endpoint: pick(&file_vals, "VOICE_ENDPOINT")?,
+        video: video_mode,
     };
+
+    // ---- モード(3): 映像テスト送出（実験的）----
+    if video_mode {
+        let fps: u32 = std::env::var("VIDEO_FPS").ok().and_then(|v| v.parse().ok()).unwrap_or(30);
+
+        // Annex-B を NAL 列に分割し、アクセスユニット (フレーム) にグループ化する。
+        // ヒューリスティック: VCL NAL (type 1/5) でフレーム終端とみなす
+        // (x264 の既定 = 1 スライス/フレーム前提。SPS/PPS/SEI は次のフレームに前置)。
+        let nals = split_annex_b(&data);
+        let mut frames: Vec<Vec<Vec<u8>>> = Vec::new();
+        let mut current: Vec<Vec<u8>> = Vec::new();
+        for nal in nals {
+            let ty = nal.first().map(|b| b & 0x1F).unwrap_or(0);
+            current.push(nal.to_vec());
+            if ty == 1 || ty == 5 {
+                frames.push(std::mem::take(&mut current));
+            }
+        }
+        if !current.is_empty() {
+            frames.push(current);
+        }
+        if frames.is_empty() {
+            anyhow::bail!("no H264 frames found (Annex-B 形式の .h264 を渡してください)");
+        }
+
+        println!("connecting to voice endpoint {} (video mode) ...", cfg.endpoint);
+        let conn = VoiceConnection::connect(cfg).await?;
+        let video_tx = conn
+            .video_sender()
+            .ok_or_else(|| anyhow::anyhow!("video sender unavailable"))?;
+
+        let total = frames.len();
+        println!("sending {total} video frames at {fps}fps (~{:.1}s) ...", total as f64 / fps as f64);
+        let step = 90_000 / fps.max(1);
+        let mut ts: u32 = 0;
+        for f in frames {
+            video_tx
+                .send(VideoFrame { nals: f, timestamp_90k: ts })
+                .await
+                .map_err(|_| anyhow::anyhow!("video task closed"))?;
+            ts = ts.wrapping_add(step);
+        }
+        // 送出タスクがキュー (最大 120 フレーム ≈ 4 秒) を掃くのを待つ
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        conn.disconnect();
+        println!("done. (Discord 上で Bot のタイルに映像が出ていれば成功)");
+        return Ok(());
+    }
 
     println!("decoding {path} ...");
     let mut pipeline = AudioPipeline::new(&Filters::default())?;

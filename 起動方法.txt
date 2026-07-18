@@ -1,0 +1,16 @@
+:: ★ 推奨: 起動.bat をダブルクリック（または cmd で 起動.bat）
+::   - 環境変数の set、companion (deno) の起動と起動待ち、
+::     サーバーの cargo run までまとめて自動でやってくれる
+::   - companion が既に起動していればそのまま使う
+::   - サーバー終了時、このスクリプトが起動した companion は自動停止
+::   - シークレットを変えたい場合は実行前に set SERVER_SECRET_KEY=... しておく
+
+:: ---- 以下は手動で起動する場合（従来の手順）----
+:: companion のディレクトリで（cmd）
+set SERVER_SECRET_KEY=0123456789abcdef
+deno task dev
+:: サーバー側（別ウィンドウ）
+set CMAKE_POLICY_VERSION_MINIMUM=3.5
+set YT_COMPANION_URL=http://127.0.0.1:8282
+set YT_COMPANION_SECRET=0123456789abcdef
+cargo run -p lavalink-server --features dave --bin lavalink-rs

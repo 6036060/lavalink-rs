@@ -10,6 +10,13 @@ description = "開発用: ローカル音声ファイルを Discord VC に流す
 name = "playfile"
 path = "src/main.rs"
 
+[features]
+default = []
+# DAVE 必須チャンネル (4017) に接続するには discord-voice の dave を有効化する。
+# 例: cargo run -p lavalink-playfile --features dave -- out.h264
+dave = ["lavalink-discord-voice/dave"]
+dave-mls = ["dave", "lavalink-discord-voice/dave-mls"]
+
 [dependencies]
 lavalink-audio-pipeline.workspace = true
 lavalink-discord-voice.workspace = true

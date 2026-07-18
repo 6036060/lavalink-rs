@@ -14,6 +14,23 @@
 use lavalink_protocol::TrackInfo;
 use serde_json::{json, Value};
 
+/// 解決済みの再生ストリーム。
+///
+/// ライブ配信の adaptiveFormats 直リンク（`live=1&noclen=1`）は通常の GET では
+/// 403 Forbidden になる（セグメント指定が必要な DASH 用 URL のため）。ライブは
+/// 本家 Lavalink と同様に HLS マニフェスト経由で再生する。
+#[derive(Debug, Clone)]
+pub enum ResolvedUrl {
+    /// プログレッシブ直リンク（通常動画）。そのまま GET でストリーミング可能。
+    Direct(String),
+    /// HLS マニフェスト URL（ライブ配信）。m3u8 を解決しセグメントを順次取得する。
+    ///
+    /// `user_agent` は URL を発行した InnerTube クライアントの UA。googlevideo は
+    /// UA 不一致のセグメント取得を 403 にすることがあるため、プレイリスト/セグメント
+    /// の取得にも同じ UA を使う（yt-dlp と同じ挙動）。
+    Hls { url: String, user_agent: Option<String> },
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum YtError {
     #[error("http error: {0}")]
@@ -27,39 +44,61 @@ pub enum YtError {
 }
 
 /// InnerTube クライアント定義（player 用）。バージョンは要定期更新。
+/// 古いバージョンだと "YouTube is no longer supported in this application or device."
+/// (playabilityStatus) で拒否される。値は yt-dlp の INNERTUBE_CLIENTS に追従する。
 struct InnertubeClient {
     name: &'static str,
     version: &'static str,
-    api_key: &'static str,
+    /// X-YouTube-Client-Name ヘッダ用の数値 ID。
+    client_id: u32,
     user_agent: &'static str,
     /// context.client に追加する固有フィールド。
     extra: fn() -> Value,
 }
 
+// yt-dlp INNERTUBE_CLIENTS (2026-01 時点) より。
 const ANDROID: InnertubeClient = InnertubeClient {
     name: "ANDROID",
-    version: "19.09.37",
-    api_key: "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
-    user_agent: "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
+    version: "21.02.35",
+    client_id: 3,
+    user_agent: "com.google.android.youtube/21.02.35 (Linux; U; Android 11) gzip",
     extra: || json!({ "androidSdkVersion": 30, "osName": "Android", "osVersion": "11" }),
 };
+// iOS はライブの HLS マニフェストを返す（HLS ライブは開始 30 秒以降 PoToken 必須）。
 const IOS: InnertubeClient = InnertubeClient {
     name: "IOS",
-    version: "19.09.3",
-    api_key: "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
-    user_agent: "com.google.ios.youtube/19.09.3 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)",
-    extra: || json!({ "deviceModel": "iPhone14,3", "osName": "iOS", "osVersion": "15.6.0.19G71" }),
+    version: "21.02.3",
+    client_id: 5,
+    user_agent: "com.google.ios.youtube/21.02.3 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+    extra: || {
+        json!({
+            "deviceMake": "Apple",
+            "deviceModel": "iPhone16,2",
+            "osName": "iPhone",
+            "osVersion": "18.3.2.22D82",
+        })
+    },
+};
+// TVHTML5_SIMPLY は HLS に PoToken 不要（yt-dlp の GVS_PO_TOKEN_POLICY より）。
+// ライブ HLS の PoToken 無しフォールバックとして有用。
+const TV_SIMPLY: InnertubeClient = InnertubeClient {
+    name: "TVHTML5_SIMPLY",
+    version: "1.0",
+    client_id: 75,
+    user_agent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+    extra: || json!({}),
 };
 const TVHTML5: InnertubeClient = InnertubeClient {
-    name: "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
-    version: "2.0",
-    api_key: "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
-    user_agent: "Mozilla/5.0 (PlayStation; PlayStation 4/12.00) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+    name: "TVHTML5",
+    version: "7.20260114.12.00",
+    client_id: 7,
+    user_agent: "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)",
     extra: || json!({}),
 };
 
-const PLAYER_CLIENTS: &[&InnertubeClient] = &[&ANDROID, &IOS, &TVHTML5];
-const WEB_KEY: &str = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+const PLAYER_CLIENTS: &[&InnertubeClient] = &[&ANDROID, &IOS, &TV_SIMPLY, &TVHTML5];
+/// 検索(WEB クライアント)用バージョン。
+const WEB_VERSION: &str = "2.20260114.08.00";
 
 impl InnertubeClient {
     fn context(&self) -> Value {
@@ -143,6 +182,8 @@ impl YoutubeClient {
         let mut req = self
             .http
             .post(format!("{base}/companion/youtubei/v1/player"))
+            // companion 停止/ハング時に loadtracks 全体を巻き込まないよう短めに切る。
+            .timeout(std::time::Duration::from_secs(10))
             .header("Content-Type", "application/json")
             .json(&json!({ "videoId": video_id }));
         if let Some(secret) = &self.companion_secret {
@@ -158,7 +199,8 @@ impl YoutubeClient {
         client: &InnertubeClient,
         po_token: Option<&str>,
     ) -> Result<Value, YtError> {
-        let url = format!("https://www.youtube.com/youtubei/v1/player?key={}", client.api_key);
+        // 近年の InnerTube は key クエリ不要（yt-dlp も送らない）。
+        let url = "https://www.youtube.com/youtubei/v1/player".to_string();
         let mut context = client.context();
         if let Some(vd) = &self.visitor_data {
             if let Some(c) = context.get_mut("client").and_then(Value::as_object_mut) {
@@ -178,7 +220,9 @@ impl YoutubeClient {
             .http
             .post(&url)
             .header("User-Agent", client.user_agent)
-            .header("X-Goog-Api-Format-Version", "2")
+            .header("X-YouTube-Client-Name", client.client_id.to_string())
+            .header("X-YouTube-Client-Version", client.version)
+            .header("Origin", "https://www.youtube.com")
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -187,15 +231,49 @@ impl YoutubeClient {
         Ok(resp.json::<Value>().await?)
     }
 
-    /// メタデータ + 直接ストリーム URL を解決（複数クライアントをフォールバック）。
-    pub async fn resolve_stream(&self, video_id: &str) -> Result<(TrackInfo, String), YtError> {
+    /// メタデータ + 再生ストリームを解決（複数クライアントをフォールバック）。
+    /// 通常動画は直リンク、ライブ配信は HLS マニフェストを返す。
+    pub async fn resolve_stream(&self, video_id: &str) -> Result<(TrackInfo, ResolvedUrl), YtError> {
         // invidious-companion 経由（URL は復号済み・PoToken/署名復号は companion が処理）。
         if self.companion_url.is_some() {
-            let resp = self.companion_player(video_id).await?;
-            if let Some(reason) = playability_error(&resp) {
-                return Err(YtError::Unavailable(reason));
+            match self.companion_player(video_id).await {
+                Ok(resp) => {
+                    if let Some(reason) = playability_error(&resp) {
+                        return Err(YtError::Unavailable(reason));
+                    }
+                    match parse_player(&resp, video_id) {
+                        // 通常動画: companion が videoplayback をプロキシ URL に書き換えるので
+                        // そのまま使える。
+                        Some((info, ResolvedUrl::Direct(url))) => {
+                            return Ok((info, ResolvedUrl::Direct(url)));
+                        }
+                        // ライブ(HLS): companion は HLS マニフェスト/セグメントをプロキシしない
+                        // ため、生の googlevideo URL のままでは PoToken 無しで 403 になる。
+                        // PoToken/UA を付与できる直接 InnerTube 経路へフォールバックする。
+                        Some((_, ResolvedUrl::Hls { .. })) => {
+                            tracing::info!(
+                                "live stream: companion does not proxy HLS; falling back to \
+                                 direct InnerTube resolution (with PoToken if configured)"
+                            );
+                        }
+                        None => {
+                            tracing::warn!(
+                                "companion returned no usable format; falling back to direct \
+                                 InnerTube resolution"
+                            );
+                        }
+                    }
+                }
+                // 接続失敗（companion 未起動等）・タイムアウト・HTTP エラーは
+                // 直接 InnerTube 経路へフォールバックする（従来はここで即エラーだった）。
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "companion request failed (is invidious-companion running on \
+                         YT_COMPANION_URL?); falling back to direct InnerTube resolution"
+                    );
+                }
             }
-            return parse_player(&resp, video_id).ok_or(YtError::NoFormat);
         }
 
         let po_token = self.po_token(video_id).await;
@@ -207,13 +285,29 @@ impl YoutubeClient {
                         last_status = Some(reason);
                         continue;
                     }
-                    if let Some((info, mut url)) = parse_player(&resp, video_id) {
-                        if let Some(pot) = &po_token {
-                            let sep = if url.contains('?') { '&' } else { '?' };
-                            url = format!("{url}{sep}pot={pot}");
+                    if let Some((info, mut resolved)) = parse_player(&resp, video_id) {
+                        match &mut resolved {
+                            ResolvedUrl::Direct(url) => {
+                                // 直リンク（クエリ形式）にはクエリで pot を付与。
+                                if let Some(pot) = &po_token {
+                                    let sep = if url.contains('?') { '&' } else { '?' };
+                                    *url = format!("{url}{sep}pot={pot}");
+                                }
+                            }
+                            ResolvedUrl::Hls { url, user_agent } => {
+                                // HLS マニフェスト（パス形式 URL）には yt-dlp と同様に
+                                // パスセグメントとして pot を付与する。クエリだと
+                                // googlevideo がセグメント URL へ引き継がない。
+                                if let Some(pot) = &po_token {
+                                    *url =
+                                        format!("{}/pot/{}", url.trim_end_matches('/'), pot);
+                                }
+                                // セグメント取得にも同じクライアント UA を使わせる。
+                                *user_agent = Some(client.user_agent.to_string());
+                            }
                         }
                         tracing::debug!(client = client.name, "resolved youtube stream");
-                        return Ok((info, url));
+                        return Ok((info, resolved));
                     }
                 }
                 Err(e) => {
@@ -230,13 +324,26 @@ impl YoutubeClient {
     /// メタデータのみ解決（uri=watch URL）。loadtracks の単曲用。
     pub async fn resolve_meta(&self, video_id: &str) -> Result<TrackInfo, YtError> {
         if self.companion_url.is_some() {
-            let resp = self.companion_player(video_id).await?;
-            if playability_error(&resp).is_none() {
-                if let Some(info) = parse_meta(&resp, video_id) {
-                    return Ok(info);
+            match self.companion_player(video_id).await {
+                Ok(resp) => {
+                    if let Some(reason) = playability_error(&resp) {
+                        return Err(YtError::Unavailable(reason));
+                    }
+                    if let Some(info) = parse_meta(&resp, video_id) {
+                        return Ok(info);
+                    }
+                    tracing::warn!(
+                        "companion response had no metadata; falling back to direct InnerTube"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "companion request failed (is invidious-companion running on \
+                         YT_COMPANION_URL?); falling back to direct InnerTube resolution"
+                    );
                 }
             }
-            return Err(YtError::NoFormat);
         }
         let po_token = self.po_token(video_id).await;
         for client in PLAYER_CLIENTS {
@@ -251,17 +358,17 @@ impl YoutubeClient {
         Err(YtError::NoFormat)
     }
 
-    /// 再生時の再解決: videoId → 直接ストリーム URL。
-    pub async fn stream_url(&self, video_id: &str) -> Result<String, YtError> {
+    /// 再生時の再解決: videoId → 再生ストリーム（直リンク or HLS）。
+    pub async fn stream_url(&self, video_id: &str) -> Result<ResolvedUrl, YtError> {
         Ok(self.resolve_stream(video_id).await?.1)
     }
 
     /// `ytsearch:` 検索。WEB クライアントの search を叩き videoRenderer を収集する。
     pub async fn search(&self, query: &str) -> Result<Vec<TrackInfo>, YtError> {
-        let url = format!("https://www.youtube.com/youtubei/v1/search?key={WEB_KEY}");
+        let url = "https://www.youtube.com/youtubei/v1/search".to_string();
         let body = json!({
             "query": query,
-            "context": { "client": { "clientName": "WEB", "clientVersion": "2.20240101.00.00", "hl": "en", "gl": "US" } },
+            "context": { "client": { "clientName": "WEB", "clientVersion": WEB_VERSION, "hl": "en", "gl": "US" } },
         });
         let resp = self
             .http
@@ -331,35 +438,53 @@ fn parse_meta(resp: &Value, video_id: &str) -> Option<TrackInfo> {
     meta_from_details(resp.get("videoDetails")?, video_id)
 }
 
-/// player レスポンスから (メタ, 直接ストリームURL) を作る。AAC/m4a(itag 140)を優先。
-fn parse_player(resp: &Value, video_id: &str) -> Option<(TrackInfo, String)> {
+/// player レスポンスから (メタ, 再生ストリーム) を作る。
+/// 通常動画は AAC/m4a(itag 140) の直リンクを優先。ライブ配信は HLS マニフェスト
+/// （直リンクは `live=1&noclen=1` で通常 GET 不可・403 のため使わない）。
+fn parse_player(resp: &Value, video_id: &str) -> Option<(TrackInfo, ResolvedUrl)> {
     let info = parse_meta(resp, video_id)?;
-    let formats = resp.get("streamingData")?.get("adaptiveFormats")?.as_array()?;
+    let sd = resp.get("streamingData")?;
+    let hls = sd.get("hlsManifestUrl").and_then(Value::as_str);
+
+    // ライブ配信は HLS のみ（直リンクは 403 になるため次クライアントへ委ねる）。
+    let is_live = resp
+        .pointer("/videoDetails/isLive")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if is_live {
+        return hls.map(|h| (info, ResolvedUrl::Hls { url: h.to_string(), user_agent: None }));
+    }
 
     let mut best: Option<(i64, String)> = None; // (優先度, url)
-    for f in formats {
-        let url = match f.get("url").and_then(Value::as_str) {
-            Some(u) => u,
-            None => continue, // signatureCipher のみ → JS 復号未対応のためスキップ
-        };
-        let mime = f.get("mimeType").and_then(Value::as_str).unwrap_or("");
-        if !mime.starts_with("audio/") {
-            continue;
-        }
-        let itag = f.get("itag").and_then(Value::as_i64).unwrap_or(0);
-        // 優先度: itag 140(m4a/AAC, symphonia でデコード可) を最優先。
-        let score = if itag == 140 {
-            100
-        } else if mime.starts_with("audio/mp4") {
-            50
-        } else {
-            10 // audio/webm(opus) 等。デコーダ未対応だが最後の手段。
-        };
-        if best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
-            best = Some((score, url.to_string()));
+    if let Some(formats) = sd.get("adaptiveFormats").and_then(Value::as_array) {
+        for f in formats {
+            let url = match f.get("url").and_then(Value::as_str) {
+                Some(u) => u,
+                None => continue, // signatureCipher のみ → JS 復号未対応のためスキップ
+            };
+            let mime = f.get("mimeType").and_then(Value::as_str).unwrap_or("");
+            if !mime.starts_with("audio/") {
+                continue;
+            }
+            let itag = f.get("itag").and_then(Value::as_i64).unwrap_or(0);
+            // 優先度: itag 140(m4a/AAC, symphonia でデコード可) を最優先。
+            let score = if itag == 140 {
+                100
+            } else if mime.starts_with("audio/mp4") {
+                50
+            } else {
+                10 // audio/webm(opus) 等。デコーダ未対応だが最後の手段。
+            };
+            if best.as_ref().map(|(s, _)| score > *s).unwrap_or(true) {
+                best = Some((score, url.to_string()));
+            }
         }
     }
-    best.map(|(_, url)| (info, url))
+    if let Some((_, url)) = best {
+        return Some((info, ResolvedUrl::Direct(url)));
+    }
+    // 直リンクが無い場合の最終フォールバック（HLS 配信のみの動画等）。
+    hls.map(|h| (info, ResolvedUrl::Hls { url: h.to_string(), user_agent: None }))
 }
 
 /// JSON を再帰的に走査し videoRenderer から TrackInfo を収集する（検索結果用）。
@@ -520,8 +645,46 @@ mod tests {
                 { "itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "url": "https://m4a" }
             ]}
         });
-        let (info, url) = parse_player(&resp, "vid12345678").unwrap();
-        assert_eq!(url, "https://m4a");
+        let (info, resolved) = parse_player(&resp, "vid12345678").unwrap();
+        assert!(matches!(resolved, ResolvedUrl::Direct(u) if u == "https://m4a"));
         assert_eq!(info.length, 100_000);
+    }
+
+    #[test]
+    fn live_uses_hls_manifest() {
+        // ライブ配信: adaptiveFormats に直リンクがあっても HLS を使う
+        // （live=1 の直リンクは通常 GET で 403 になるため）。
+        let resp = json!({
+            "videoDetails": {
+                "title": "Live", "author": "A", "lengthSeconds": "0",
+                "isLiveContent": true, "isLive": true
+            },
+            "streamingData": {
+                "hlsManifestUrl": "https://manifest.googlevideo.com/api/manifest/hls_variant/x/index.m3u8",
+                "adaptiveFormats": [
+                    { "itag": 140, "mimeType": "audio/mp4", "url": "https://direct-live?live=1&noclen=1" }
+                ]
+            }
+        });
+        let (info, resolved) = parse_player(&resp, "vid12345678").unwrap();
+        assert!(info.is_stream);
+        assert!(matches!(resolved, ResolvedUrl::Hls { url, .. } if url.contains("hls_variant")));
+    }
+
+    #[test]
+    fn live_without_hls_returns_none() {
+        // ライブで HLS マニフェストが無いクライアント応答はスキップ（次のクライアントへ）。
+        let resp = json!({
+            "videoDetails": {
+                "title": "Live", "author": "A", "lengthSeconds": "0",
+                "isLiveContent": true, "isLive": true
+            },
+            "streamingData": {
+                "adaptiveFormats": [
+                    { "itag": 140, "mimeType": "audio/mp4", "url": "https://direct-live?live=1" }
+                ]
+            }
+        });
+        assert!(parse_player(&resp, "vid12345678").is_none());
     }
 }

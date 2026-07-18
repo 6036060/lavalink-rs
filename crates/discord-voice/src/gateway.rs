@@ -14,6 +14,7 @@ pub mod op {
     pub const RESUME: u64 = 7;
     pub const HELLO: u64 = 8;
     pub const RESUMED: u64 = 9;
+    pub const VIDEO: u64 = 12;
     pub const CLIENT_DISCONNECT: u64 = 13;
 }
 
@@ -58,4 +59,65 @@ pub fn heartbeat(nonce: u64, seq_ack: i64) -> Value {
 /// op 5 Speaking（音声送出前に最低 1 回。microphone ビット）。
 pub fn speaking(ssrc: u32) -> Value {
     json!({ "op": op::SPEAKING, "d": { "speaking": 1, "delay": 0, "ssrc": ssrc } })
+}
+
+// ----------------------------- 映像 (実験的) -----------------------------
+//
+// ⚠️ ボットの映像送信は Discord 公式には文書化されていない。以下のペイロード形状は
+// コミュニティのリバースエンジニアリング (Discord-video-stream 等) と公式クライアントの
+// キャプチャに基づくもので、結線前に実キャプチャでの検証が必要 (docs/video-streaming-plan.md)。
+
+/// op 1 Select Protocol の映像対応版。`codecs` で音声 (opus) + 映像 (H264) を宣言する。
+/// payload_type は Discord クライアントの慣例値 (opus=120, H264=101, rtx=102)。
+pub fn select_protocol_with_codecs(address: &str, port: u16, mode: &str) -> Value {
+    json!({
+        "op": op::SELECT_PROTOCOL,
+        "d": {
+            "protocol": "udp",
+            "data": { "address": address, "port": port, "mode": mode },
+            "codecs": [
+                { "name": "opus", "type": "audio", "priority": 1000, "payload_type": 120 },
+                {
+                    "name": "H264",
+                    "type": "video",
+                    "priority": 1000,
+                    "payload_type": 101,
+                    "rtx_payload_type": 102,
+                    "encode": true,
+                    "decode": true
+                }
+            ]
+        }
+    })
+}
+
+/// op 12 Video。映像ストリームの SSRC を宣言する (送出開始前に 1 回、停止時は
+/// `video_ssrc=0` で送る)。`audio_ssrc` は READY で得た自身の SSRC。
+pub fn video(
+    audio_ssrc: u32,
+    video_ssrc: u32,
+    rtx_ssrc: u32,
+    width: u32,
+    height: u32,
+    framerate: u32,
+) -> Value {
+    json!({
+        "op": op::VIDEO,
+        "d": {
+            "audio_ssrc": audio_ssrc,
+            "video_ssrc": video_ssrc,
+            "rtx_ssrc": rtx_ssrc,
+            "streams": [{
+                "type": "video",
+                "rid": "100",
+                "ssrc": video_ssrc,
+                "active": video_ssrc != 0,
+                "quality": 100,
+                "rtx_ssrc": rtx_ssrc,
+                "max_bitrate": 2_500_000,
+                "max_framerate": framerate,
+                "max_resolution": { "type": "fixed", "width": width, "height": height }
+            }]
+        }
+    })
 }

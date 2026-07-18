@@ -63,6 +63,23 @@ impl Cipher {
             }
         }
     }
+
+    /// `ciphertext||tag` を復号する（encrypt の逆。テスト・受信経路用）。
+    pub fn decrypt(&self, counter: u32, aad: &[u8], ciphertext: &[u8]) -> Option<Vec<u8>> {
+        let payload = Payload { msg: ciphertext, aad };
+        match self {
+            Cipher::Gcm(c) => {
+                let mut nonce = [0u8; 12];
+                nonce[0..4].copy_from_slice(&counter.to_be_bytes());
+                c.decrypt(Nonce::from_slice(&nonce), payload).ok()
+            }
+            Cipher::XCha(c) => {
+                let mut nonce = [0u8; 24];
+                nonce[0..4].copy_from_slice(&counter.to_be_bytes());
+                c.decrypt(XNonce::from_slice(&nonce), payload).ok()
+            }
+        }
+    }
 }
 
 #[cfg(test)]

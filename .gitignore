@@ -6,3 +6,26 @@ Cargo.lock.orig
 *.log
 .DS_Store
 voice.env
+
+# 個人設定・シークレット（配布用は application.example.yml を参照）
+application.yml
+
+# Discord ボイスセッションのシークレット
+voice.env
+
+# サードパーティのクローン（別途 https://github.com/iv-org/invidious-companion を取得）
+/potoken/
+
+# 過去の重複コピー
+/lavalink-rs-server/
+
+# テスト用メディア・生成物
+input.mp4
+out.h264
+out.wav
+*.mp4
+*.wav
+*.h264
+
+# Claude Code のローカル設定
+.claude/settings.local.json

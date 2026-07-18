@@ -11,6 +11,7 @@
 //! 実装(openmls)はフェーズ3-5c（feature = "dave-mls", 実機テスト要）。
 
 pub mod frame;
+pub mod video_frame;
 mod gcm;
 pub mod cryptor;
 pub mod opcodes;

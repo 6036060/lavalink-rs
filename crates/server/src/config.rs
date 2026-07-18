@@ -39,22 +39,37 @@ pub struct LavalinkConfig {
     pub server: LavalinkServer,
 }
 
+/// 注意: config クレートはファイル/環境変数のキーをマージ時にすべて小文字化する
+/// （`Expression::set` が `to_lowercase()` を行う）。そのため camelCase キーは
+/// `#[serde(rename_all = "camelCase")]` だけでは一致せず、既定値へ静かにフォールバック
+/// してしまう（playerUpdateInterval が常に 5 になるバグの原因）。
+/// 全小文字の alias を併記して両方のキー形を受け付ける。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LavalinkServer {
     pub password: String,
     pub sources: Sources,
     pub filters: Filters,
+    #[serde(alias = "bufferdurationms")]
     pub buffer_duration_ms: u32,
+    #[serde(alias = "framebufferdurationms")]
     pub frame_buffer_duration_ms: u32,
+    #[serde(alias = "opusencodingquality")]
     pub opus_encoding_quality: u8,
+    #[serde(alias = "resamplingquality")]
     pub resampling_quality: ResamplingQuality,
+    #[serde(alias = "trackstuckthresholdms")]
     pub track_stuck_threshold_ms: u64,
+    #[serde(alias = "useseekghosting")]
     pub use_seek_ghosting: bool,
+    #[serde(alias = "youtubeplaylistloadlimit")]
     pub youtube_playlist_load_limit: u32,
     /// playerUpdate op の送信間隔（秒）。
+    #[serde(alias = "playerupdateinterval")]
     pub player_update_interval: u64,
+    #[serde(alias = "youtubesearchenabled")]
     pub youtube_search_enabled: bool,
+    #[serde(alias = "soundcloudsearchenabled")]
     pub soundcloud_search_enabled: bool,
 }
 
@@ -118,7 +133,9 @@ pub struct Filters {
     pub vibrato: bool,
     pub distortion: bool,
     pub rotation: bool,
+    #[serde(alias = "channelmix")]
     pub channel_mix: bool,
+    #[serde(alias = "lowpass")]
     pub low_pass: bool,
 }
 
@@ -202,6 +219,49 @@ mod tests {
         assert_eq!(cfg.lavalink.server.player_update_interval, 5);
         assert_eq!(cfg.lavalink.server.resampling_quality, ResamplingQuality::Low);
         assert_eq!(cfg.lavalink.server.track_stuck_threshold_ms, 10_000);
+    }
+
+    // config クレートはマージ時にキーを小文字化するため、camelCase キーが
+    // 既定値へフォールバックしていないことを「非デフォルト値」で検証する回帰テスト。
+    #[test]
+    fn camelcase_keys_override_defaults() {
+        let yaml = r#"
+lavalink:
+  server:
+    playerUpdateInterval: 1
+    bufferDurationMs: 800
+    frameBufferDurationMs: 1000
+    opusEncodingQuality: 5
+    resamplingQuality: HIGH
+    trackStuckThresholdMs: 5000
+    useSeekGhosting: false
+    youtubePlaylistLoadLimit: 3
+    youtubeSearchEnabled: false
+    soundcloudSearchEnabled: false
+    filters:
+      channelMix: false
+      lowPass: false
+"#;
+        let cfg: AppConfig = Config::builder()
+            .add_source(File::from_str(yaml, FileFormat::Yaml))
+            .build()
+            .expect("build")
+            .try_deserialize()
+            .expect("deserialize");
+
+        let s = &cfg.lavalink.server;
+        assert_eq!(s.player_update_interval, 1);
+        assert_eq!(s.buffer_duration_ms, 800);
+        assert_eq!(s.frame_buffer_duration_ms, 1000);
+        assert_eq!(s.opus_encoding_quality, 5);
+        assert_eq!(s.resampling_quality, ResamplingQuality::High);
+        assert_eq!(s.track_stuck_threshold_ms, 5000);
+        assert!(!s.use_seek_ghosting);
+        assert_eq!(s.youtube_playlist_load_limit, 3);
+        assert!(!s.youtube_search_enabled);
+        assert!(!s.soundcloud_search_enabled);
+        assert!(!s.filters.channel_mix);
+        assert!(!s.filters.low_pass);
     }
 
     #[test]

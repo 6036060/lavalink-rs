@@ -5,7 +5,8 @@
 //! - 機能実装(数値は Lavaplayer と完全一致ではない・フェーズ6 で要精緻化):
 //!   equalizer(15バンド peaking) / karaoke(センター除去) / vibrato(可変ディレイ) /
 //!   rotation(オートパン) / distortion(波形整形)
-//! - 未実装(明示スタブ): timescale(speed/pitch/rate) — 位相ボコーダ/WSOLA が必要なため後続。
+//! - timescale(speed/pitch/rate) は本チェーンではなく `timescale.rs`（WSOLA＋リサンプル）が
+//!   ストリーミング経路(`decode_stream_to_opus`)で適用する。
 
 use std::f32::consts::PI;
 
@@ -57,13 +58,6 @@ impl Biquad {
             -2.0 * cos,
             1.0 - alpha / a,
         )
-    }
-
-    fn bandpass(freq: f32, q: f32) -> Self {
-        let w0 = 2.0 * PI * freq / SR;
-        let (sin, cos) = w0.sin_cos();
-        let alpha = sin / (2.0 * q);
-        Biquad::new(alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
     }
 
     #[inline]
@@ -156,9 +150,11 @@ struct Vibrato {
     pos: usize,
 }
 impl Vibrato {
-    const MAX_DELAY: usize = 512; // < buffer len
+    // lavadsp VibratoFilter に合わせ、最大変調ディレイ ≈2ms（48kHz で 96 サンプル）。
+    // 以前の 512 サンプル(≈10.7ms)は変調が過大でピッチが揺れすぎた。
+    const MAX_DELAY: usize = 96; // < buffer len
     fn new(freq: f32, depth: f32) -> Self {
-        let len = 1024;
+        let len = 256;
         Self {
             step: 2.0 * PI * freq / SR,
             depth,
@@ -249,20 +245,38 @@ impl Equalizer {
     }
 }
 
+/// lavadsp の KaraokeConverter と同一のアルゴリズム。
+/// 左右の差分でセンター（ボーカル）を除去し、filterBand 周辺のモノ成分だけ
+/// バンドパスで復元する: `out_l = l - r*level + bandpass(mono)*monoLevel*level`。
 struct Karaoke {
     level: f32,
     mono_level: f32,
-    band_l: Biquad,
-    band_r: Biquad,
+    // 2 次 IIR バンドパス係数（lavadsp と同じ導出）
+    a: f32,
+    b: f32,
+    c: f32,
+    y1: f32,
+    y2: f32,
 }
 impl Karaoke {
+    fn new(level: f32, mono_level: f32, filter_band: f32, filter_width: f32) -> Self {
+        let c = (-2.0 * PI * filter_width / SR).exp();
+        let b = -4.0 * c / (1.0 + c) * (2.0 * PI * filter_band / SR).cos();
+        // 数値誤差で負になり得るため 0 でクランプ（Java 実装は NaN になる）。
+        let a = (1.0 - b * b / (4.0 * c)).max(0.0).sqrt() * (1.0 - c);
+        Self { level, mono_level, a, b, c, y1: 0.0, y2: 0.0 }
+    }
     fn process(&mut self, buf: &mut [f32]) {
         for s in buf.chunks_exact_mut(2) {
-            let center = (s[0] + s[1]) * 0.5;
-            let fl = self.band_l.process(center);
-            let fr = self.band_r.process(center);
-            s[0] = self.level * s[0] - self.mono_level * fl;
-            s[1] = self.level * s[1] - self.mono_level * fr;
+            let (l, r) = (s[0], s[1]);
+            // モノ成分を filterBand 中心のバンドパスへ
+            let y = self.a * ((l + r) * 0.5) - self.b * self.y1 - self.c * self.y2;
+            self.y2 = self.y1;
+            self.y1 = y;
+            let o = y * self.mono_level * self.level;
+            // センターカット + フィルタ済みモノの復元
+            s[0] = l - r * self.level + o;
+            s[1] = r - l * self.level + o;
         }
     }
 }
@@ -291,7 +305,8 @@ impl FilterChain {
             let mut gains = [0.0f32; 15];
             for b in bands {
                 if (b.band as usize) < 15 {
-                    gains[b.band as usize] = b.gain;
+                    // 公式仕様: gain は -0.25(ミュート)〜1.0。範囲外はクランプ。
+                    gains[b.band as usize] = b.gain.clamp(-0.25, 1.0);
                 }
             }
             if gains.iter().any(|&g| g != 0.0) {
@@ -302,15 +317,12 @@ impl FilterChain {
         });
 
         let karaoke = f.karaoke.map(|k| {
-            let band = k.filter_band.unwrap_or(220.0);
-            let width = k.filter_width.unwrap_or(100.0).max(1.0);
-            let q = (band / width).max(0.1);
-            Karaoke {
-                level: k.level.unwrap_or(1.0),
-                mono_level: k.mono_level.unwrap_or(1.0),
-                band_l: Biquad::bandpass(band, q),
-                band_r: Biquad::bandpass(band, q),
-            }
+            Karaoke::new(
+                k.level.unwrap_or(1.0),
+                k.mono_level.unwrap_or(1.0),
+                k.filter_band.unwrap_or(220.0),
+                k.filter_width.unwrap_or(100.0).max(1.0),
+            )
         });
 
         let distortion = f.distortion.map(|d| Distortion {
@@ -336,9 +348,11 @@ impl FilterChain {
             rr: c.right_to_right.unwrap_or(1.0),
         });
 
+        // 公式仕様の範囲（vibrato: freq ≤14, depth ≤1 / tremolo: depth ≤1）へ防御的にクランプ。
+        // REST 層でも 400 検証するが、内部利用（デフォルト合成等）でも安全にする。
         let vibrato = f.vibrato.and_then(|v| {
-            let freq = v.frequency.unwrap_or(0.0);
-            let depth = v.depth.unwrap_or(0.0);
+            let freq = v.frequency.unwrap_or(0.0).min(14.0);
+            let depth = v.depth.unwrap_or(0.0).min(1.0);
             if freq > 0.0 && depth > 0.0 {
                 Some(Vibrato::new(freq, depth))
             } else {
@@ -348,7 +362,7 @@ impl FilterChain {
 
         let tremolo = f.tremolo.and_then(|t| {
             let freq = t.frequency.unwrap_or(0.0);
-            let depth = t.depth.unwrap_or(0.0);
+            let depth = t.depth.unwrap_or(0.0).min(1.0);
             if freq > 0.0 && depth > 0.0 {
                 Some(Tremolo { step: 2.0 * PI * freq / SR, depth, phase: 0.0 })
             } else {
@@ -423,7 +437,7 @@ impl FilterChain {
         if let Some(lp) = self.low_pass.as_mut() {
             lp.process(buf);
         }
-        // timescale は未実装（スタブ）: 何もしない。
+        // timescale はストリーミング経路（timescale.rs）で適用されるためここでは扱わない。
         if (self.volume - 1.0).abs() > f32::EPSILON {
             for v in buf.iter_mut() {
                 *v *= self.volume;
@@ -493,6 +507,56 @@ mod tests {
         let mut buf = vec![1.0; 200 * 2];
         c.process(&mut buf);
         assert!((buf[buf.len() - 1] - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn karaoke_removes_center_vocal() {
+        use lavalink_protocol::Karaoke as KaraokeDto;
+        let mut c = chain(Filters {
+            karaoke: Some(KaraokeDto {
+                level: Some(1.0),
+                mono_level: Some(1.0),
+                filter_band: Some(220.0),
+                filter_width: Some(100.0),
+            }),
+            ..Default::default()
+        });
+        // センター定位（左右同一）の 1kHz サイン波 ≒ ボーカル
+        let n = 4800; // 100ms
+        let mut buf = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let v = (2.0 * PI * 1000.0 * i as f32 / SR).sin() * 0.5;
+            buf.push(v);
+            buf.push(v);
+        }
+        let rms_in = (buf.iter().map(|v| v * v).sum::<f32>() / buf.len() as f32).sqrt();
+        c.process(&mut buf);
+        let rms_out = (buf.iter().map(|v| v * v).sum::<f32>() / buf.len() as f32).sqrt();
+        // filterBand(220Hz) から離れたセンター成分は大幅に減衰する
+        assert!(
+            rms_out < rms_in * 0.1,
+            "center not removed: in={rms_in} out={rms_out}"
+        );
+    }
+
+    #[test]
+    fn karaoke_keeps_side_content() {
+        use lavalink_protocol::Karaoke as KaraokeDto;
+        let mut c = chain(Filters {
+            karaoke: Some(KaraokeDto {
+                level: Some(1.0),
+                mono_level: Some(1.0),
+                filter_band: None, // デフォルト 220/100
+                filter_width: None,
+            }),
+            ..Default::default()
+        });
+        // 左右逆相（サイド成分 ≒ 伴奏の広がり）はモノ成分ゼロなので残る
+        // (lavadsp 準拠で out_l = l - r*level = 2l に増幅される)
+        let mut buf = vec![0.25, -0.25, 0.25, -0.25];
+        c.process(&mut buf);
+        assert!((buf[0] - 0.5).abs() < 1e-6, "side content altered: {}", buf[0]);
+        assert!((buf[1] + 0.5).abs() < 1e-6, "side content altered: {}", buf[1]);
     }
 
     #[test]
