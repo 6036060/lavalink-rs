@@ -81,6 +81,14 @@ companion は `bgutils-js` + `YouTube.js` で **PoToken 生成・署名復号・
 `POST /companion/youtubei/v1/player`（Bearer 認証, body `{"videoId":..}`）で
 **復号済みの再生可能 URL を含む player JSON** を返す（レスポンス形は YouTube と同じ）。
 
+> ℹ️ companion 本体はサードパーティ製のため本リポジトリには同梱していない。
+> 別途 [`iv-org/invidious-companion`](https://github.com/iv-org/invidious-companion) を取得すること
+> （起動スクリプト `起動.bat` は `potoken/invidious-companion` に配置されている前提）。
+> ```bat
+> git clone https://github.com/iv-org/invidious-companion potoken/invidious-companion
+> ```
+> 実行には [Deno](https://deno.land) が必要。
+
 導入:
 1. companion を起動（例）: `SERVER_SECRET_KEY=CHANGEME deno task dev`（既定 `127.0.0.1:8282`）
 2. 本サーバーに環境変数を設定して起動:
